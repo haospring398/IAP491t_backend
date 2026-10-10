@@ -1,0 +1,17 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.env*
+!.env.example
+dumped_models/
+*.pkl
+*.npy
+*.npz
+*.joblib
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+*.eml
+!web/backend/samples/*.eml

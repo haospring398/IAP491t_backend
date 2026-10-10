@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:iap:analysis:v1",
+  "title": "AnalysisContract",
+  "oneOf": [{ "$ref": "#/definitions/AnalysisSuccess" }, { "$ref": "#/definitions/AnalysisError" }, { "$ref": "#/definitions/AnalysisStatus" }],
+  "definitions": {
+    "RequestId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "ErrorCode": {
+      "type": "string",
+      "enum": ["INVALID_REQUEST", "EMAIL_TOO_LARGE", "EMPTY_EMAIL", "INVALID_EMAIL", "INSUFFICIENT_CONTENT", "RESOURCE_LIMIT", "SERVICE_BUSY", "MODEL_UNAVAILABLE", "UPSTREAM_UNAVAILABLE", "ANALYSIS_TIMEOUT", "UPSTREAM_INVALID_RESPONSE", "INTERNAL_ERROR"]
+    },
+    "AnalysisSuccess": {
+      "type": "object", "additionalProperties": false,
+      "required": ["analysis_status", "label"],
+      "properties": { "analysis_status": { "const": "completed" }, "label": { "enum": ["legit", "spam_or_phishing", "phishing"] } }
+    },
+    "AnalysisError": {
+      "type": "object", "additionalProperties": false,
+      "required": ["error", "request_id"],
+      "properties": {
+        "request_id": { "$ref": "#/definitions/RequestId" },
+        "error": {
+          "type": "object", "additionalProperties": false, "required": ["code", "message"],
+          "properties": { "code": { "$ref": "#/definitions/ErrorCode" }, "message": { "type": "string", "minLength": 1, "maxLength": 512 } }
+        }
+      }
+    },
+    "AnalysisStatus": {
+      "type": "object", "additionalProperties": false, "required": ["request_id", "phase"],
+      "properties": { "request_id": { "$ref": "#/definitions/RequestId" }, "phase": { "enum": ["unknown", "starting", "receiving", "processing"] } }
+    }
+  }
+}

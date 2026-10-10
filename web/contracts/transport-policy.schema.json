@@ -1,0 +1,474 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TransportPolicy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "limits",
+    "deadlines",
+    "retry",
+    "polling",
+    "errors"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fileBytes",
+        "multipartBytes",
+        "mimeParts",
+        "mimeDepth",
+        "decodedBytes",
+        "tokens",
+        "allowedParserDefects"
+      ],
+      "properties": {
+        "fileBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "multipartBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mimeParts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mimeDepth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "decodedBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "allowedParserDefects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "deadlines": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "browserMs",
+        "proxyMs",
+        "backendMs",
+        "workerStartupMs",
+        "backendReserveMs",
+        "clockSkewMs",
+        "terminateMs",
+        "killReapMs",
+        "handlerSeconds"
+      ],
+      "properties": {
+        "browserMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "proxyMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "backendMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "workerStartupMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "backendReserveMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "clockSkewMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "terminateMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "killReapMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "handlerSeconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxRetries"
+      ],
+      "properties": {
+        "maxRetries": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "polling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intervalMs",
+        "maxPolls",
+        "timeoutMs"
+      ],
+      "properties": {
+        "intervalMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxPolls": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "INVALID_REQUEST",
+        "EMAIL_TOO_LARGE",
+        "EMPTY_EMAIL",
+        "INVALID_EMAIL",
+        "INSUFFICIENT_CONTENT",
+        "RESOURCE_LIMIT",
+        "SERVICE_BUSY",
+        "MODEL_UNAVAILABLE",
+        "UPSTREAM_UNAVAILABLE",
+        "ANALYSIS_TIMEOUT",
+        "UPSTREAM_INVALID_RESPONSE",
+        "INTERNAL_ERROR"
+      ],
+      "properties": {
+        "INVALID_REQUEST": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "EMAIL_TOO_LARGE": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "EMPTY_EMAIL": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "INVALID_EMAIL": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "INSUFFICIENT_CONTENT": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "RESOURCE_LIMIT": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "SERVICE_BUSY": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "MODEL_UNAVAILABLE": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "UPSTREAM_UNAVAILABLE": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "ANALYSIS_TIMEOUT": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "UPSTREAM_INVALID_RESPONSE": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "INTERNAL_ERROR": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "http",
+            "retryAfterSeconds",
+            "message"
+          ],
+          "properties": {
+            "http": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "retryAfterSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        }
+      }
+    }
+  }
+}

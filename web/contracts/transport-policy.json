@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "limits": { "fileBytes": 2097152, "multipartBytes": 2162688, "mimeParts": 100, "mimeDepth": 20, "decodedBytes": 2097152, "tokens": 50000, "allowedParserDefects": [] },
+  "deadlines": { "browserMs": 165000, "proxyMs": 150000, "backendMs": 60000, "workerStartupMs": 120000, "backendReserveMs": 4000, "clockSkewMs": 2000, "terminateMs": 1000, "killReapMs": 1000, "handlerSeconds": 180 },
+  "retry": { "maxRetries": 2 },
+  "polling": { "intervalMs": 2000, "maxPolls": 75, "timeoutMs": 3000 },
+  "errors": {
+    "INVALID_REQUEST": { "http": 400, "retryAfterSeconds": 0, "message": "Choose one .eml file." },
+    "EMAIL_TOO_LARGE": { "http": 413, "retryAfterSeconds": 0, "message": "This file exceeds the 2 MiB limit, including attachments. Choose another .eml file." },
+    "EMPTY_EMAIL": { "http": 422, "retryAfterSeconds": 0, "message": "This file is empty. Choose another .eml file." },
+    "INVALID_EMAIL": { "http": 422, "retryAfterSeconds": 0, "message": "This file could not be read as an email. Choose another .eml file." },
+    "INSUFFICIENT_CONTENT": { "http": 422, "retryAfterSeconds": 0, "message": "This email does not contain enough usable content for analysis. Choose another .eml file." },
+    "RESOURCE_LIMIT": { "http": 422, "retryAfterSeconds": 0, "message": "This email exceeds the analysis resource limits. Choose another .eml file." },
+    "SERVICE_BUSY": { "http": 429, "retryAfterSeconds": 5, "message": "The analysis service is busy. Try again later." },
+    "MODEL_UNAVAILABLE": { "http": 503, "retryAfterSeconds": 5, "message": "Analysis is unavailable. Try again later." },
+    "UPSTREAM_UNAVAILABLE": { "http": 503, "retryAfterSeconds": 5, "message": "The analysis service could not be reached. Check your connection and try again." },
+    "ANALYSIS_TIMEOUT": { "http": 504, "retryAfterSeconds": 10, "message": "Analysis timed out. No result is available." },
+    "UPSTREAM_INVALID_RESPONSE": { "http": 502, "retryAfterSeconds": 5, "message": "The analysis service is unavailable. Try again later." },
+    "INTERNAL_ERROR": { "http": 500, "retryAfterSeconds": 10, "message": "Analysis could not be completed. Try again later." }
+  }
+}
