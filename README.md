@@ -12,6 +12,12 @@ Python FastAPI email-analysis service extracted from the current PhishingEmailDe
 
 Model files, training/test artifacts, real email, datasets, tokens and virtual environments are excluded. The original project and its corpus/history are not copied into this repository.
 
+## Deploy the backend on Vercel
+
+The root `app.py` exposes the cloud FastAPI app using Python 3.12 and the committed `pyproject.toml`/`uv.lock`. Follow [the dashboard deployment guide](DEPLOYMENT.md) to provision the verified inference archive in private Vercel Blob, set the server environment and connect the frontend. The cloud worker downloads only the three inference artifacts after the exporter verifies the complete original run. No model binaries or credentials belong in this repository.
+
+Cloud startup is bounded and fails closed. Imports remain model-free; liveness can succeed while readiness is 503. Cloud preparation, local parity and actual Vercel acceptance are separate checks. The hosted backend is ready to use only after its HTTPS readiness and a real-model upload pass.
+
 ## Local setup
 
 Run commands from this repository root. Use Python 3.11:
@@ -68,7 +74,7 @@ One authenticated analysis is admitted at a time, with no queue. Uploads stay in
 
 For local frontend use, set server-only `ML_API_URL=http://127.0.0.1:8000` and the same `ML_API_TOKEN`. For a frontend hosted on Vercel, the separately hosted backend must have an HTTPS URL reachable from Vercel. A developer's localhost is not reachable from Vercel. Use separate preview/production tokens and endpoints.
 
-This source publication is not a cloud deployment. Cloud packaging still needs a reproducible dependency environment, the complete trusted artifact release, a suitable HTTPS ingress/host binding and runtime startup/memory/deadline verification. The current convenience entry point deliberately binds loopback.
+The convenience entry point deliberately binds loopback and keeps its original full-run verification contract. Vercel uses the separate cloud worker and the bounded, digest-pinned inference release described in the deployment guide. Account configuration and live startup/memory/deadline verification remain deployment prerequisites.
 
 ## Verification
 

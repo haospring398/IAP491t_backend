@@ -5,6 +5,7 @@ __pycache__/
 .env*
 !.env.example
 dumped_models/
+dumped_models
 *.pkl
 *.npy
 *.npz
@@ -15,3 +16,7 @@ dumped_models/
 htmlcov/
 *.eml
 !web/backend/samples/*.eml
+releases/
+*.tar
+*.tar.gz
+.vercel/
