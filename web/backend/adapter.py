@@ -8,13 +8,27 @@ import pickle
 import random
 from email import policy as email_policy
 from email.parser import BytesParser
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 from web.backend.policy import POLICY, ROOT, RUN_ID, Rejection
 
 STARTUP_STAGES = frozenset({"DEPENDENCY_LOAD", "RUN_VERIFICATION", "RELEASE_CHANGED", "ARTIFACT_BYTES",
                            "ARTIFACT_LOAD", "MODEL_COMPATIBILITY", "INFERENCE_SETTINGS", "PROVENANCE",
                            "CLOUD_CONFIGURATION", "CLOUD_DOWNLOAD", "CLOUD_INTEGRITY"})
+
+
+def xgboost_provider():
+    """The full and CPU distributions share modules and must not coexist."""
+    installed = []
+    for name in ("xgboost", "xgboost-cpu"):
+        try:
+            version(name)
+        except PackageNotFoundError:
+            continue
+        installed.append(name)
+    if len(installed) != 1:
+        raise ValueError("Exactly one XGBoost distribution is required")
+    return installed[0]
 
 
 class StartupFailure(ValueError):
@@ -240,7 +254,7 @@ class Adapter:
             "code_sha256": {name: artifact_store.sha256(ROOT / name) for name in
                             ("preprocess.py", "artifact_store.py", "web/backend/adapter.py", "web/backend/service.py", "web/backend/policy.py")},
             "packages": {name: version(name) for name in
-                         ("numpy", "scipy", "gensim", "scikit-learn", "xgboost", "nltk", "fastapi", "uvicorn", "python-multipart")},
+                         ("numpy", "scipy", "gensim", "scikit-learn", "nltk", "fastapi", "uvicorn", "python-multipart", xgboost_provider())},
         }
 
     def vector(self, raw):

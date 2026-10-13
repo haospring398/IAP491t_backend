@@ -16,6 +16,8 @@ Model files, training/test artifacts, real email, datasets, tokens and virtual e
 
 The root `app.py` exposes the cloud FastAPI app using Python 3.12 and the committed `pyproject.toml`/`uv.lock`. Follow [the dashboard deployment guide](DEPLOYMENT.md) to provision the verified inference archive in private Vercel Blob, set the server environment and connect the frontend. The cloud worker downloads only the three inference artifacts after the exporter verifies the complete original run. No model binaries or credentials belong in this repository.
 
+The cloud environment uses `xgboost-cpu==3.2.0` to avoid GPU/NCCL dependencies. It imports the same `xgboost` modules and loads the unchanged trusted model. The local setup below keeps the full `xgboost` distribution; never install both distributions in one environment. A changed cloud source/lock needs a fresh matched archive, even when the model bytes are unchanged.
+
 Cloud startup is bounded and fails closed. Imports remain model-free; liveness can succeed while readiness is 503. Cloud preparation, local parity and actual Vercel acceptance are separate checks. The hosted backend is ready to use only after its HTTPS readiness and a real-model upload pass.
 
 ## Local setup

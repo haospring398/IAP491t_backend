@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, unquote
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 
 from web.backend.policy import ROOT, RUN_ID
+from web.backend.adapter import xgboost_provider
 
 ARTIFACTS = ("model_dbow.pkl", "feature_scaler.pkl", "XGBoost.pkl")
 MEMBERS = ("release.json", "manifest.json") + ARTIFACTS
@@ -28,7 +29,7 @@ CODE_FILES = (
     ".python-version", "vercel.json", "web/contracts/analysis.schema.json",
     "web/contracts/transport-policy.json", "web/contracts/transport-policy.schema.json",
 )
-PACKAGES = ("numpy", "scipy", "gensim", "scikit-learn", "xgboost", "nltk",
+PACKAGES = ("numpy", "scipy", "gensim", "scikit-learn", "xgboost-cpu", "nltk",
             "beautifulsoup4", "textblob", "fastapi", "uvicorn", "python-multipart", "jsonschema", "packaging")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 PRIVATE_HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62})\.private\.blob\.vercel-storage\.com\Z")
@@ -85,6 +86,8 @@ def code_hashes(root=ROOT):
 
 
 def package_versions():
+    if xgboost_provider() != "xgboost-cpu":
+        raise ValueError("Cloud release requires CPU XGBoost")
     return {name: version(name) for name in PACKAGES}
 
 
@@ -93,6 +96,8 @@ def verify_locked_environment(root=ROOT, roots=PACKAGES):
     import tomllib
     from packaging.requirements import Requirement
     from packaging.utils import canonicalize_name
+    if "xgboost-cpu" in roots and xgboost_provider() != "xgboost-cpu":
+        raise ValueError("Cloud release requires CPU XGBoost")
     lock = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
     locked = {}
     for package in lock["package"]:
