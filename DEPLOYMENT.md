@@ -8,23 +8,16 @@ In Vercel, choose **Add New → Project**, import the dedicated `IAP491t` backen
 
 The committed `.python-version` and `requires-python` pin Python 3.12. Runtime dependencies are defined in `pyproject.toml` with the transitive `uv.lock`; use the automatic Python dependency installation. Leave build/output overrides unset. The runtime config sets a 180-second function limit and excludes exports, models, datasets, environments, tests and sample files. [Python runtime documentation](https://vercel.com/docs/functions/runtimes/python), [FastAPI discovery](https://vercel.com/kb/guide/ship-a-fastapi-app-on-vercel).
 
-Check **Fluid Compute** in Project Settings → Functions after creating the project. This cloud lock uses `xgboost-cpu==3.2.0`, removing the full distribution's GPU/NCCL dependencies. It targets the standard 500 MB Python function bundle; inspect the actual deployment build size. The user's earlier full-package build failed at 974.63 MB, so advertised Large Functions enrollment is not preparation evidence for that deployment. Do not add the system-managed `VERCEL_SUPPORT_LARGE_FUNCTIONS` variable in the import form. This setup does not require a paid-plan change. [Python bundle limits](https://vercel.com/docs/functions/runtimes/python), [official CPU installation](https://xgboost.readthedocs.io/en/stable/install.html#minimal-installation-cpu-only).
+Check **Fluid Compute** in Project Settings → Functions after creating the project. The Linux ML dependency bundle may exceed the standard Python bundle limit even with models excluded. Vercel documents automatic Large Functions beta enrollment for new projects, supporting up to 5 GB with Fluid Compute. **Do not add `VERCEL_SUPPORT_LARGE_FUNCTIONS` in the New Project environment form**: that form rejects the system-managed name. For this new-project flow, remove that row and deploy using the automatic enrollment. Inspect the build's actual bundle-size/runtime evidence. Vercel documents a separate opt-in for existing projects; follow its platform prompt if an older project hits the size limit rather than forcing a rejected variable into this form. If the account cannot support the required resources within its existing plan, resolve that account prerequisite before deploying; this setup never changes a billing plan. [Large Functions announcement](https://vercel.com/changelog/vercel-functions-can-now-be-up-to-5-gb-in-package-size), [Fluid Compute](https://vercel.com/docs/fluid-compute).
 
 An initial deployment without release configuration serves liveness but remains unready. Finish provisioning and redeploy before connecting the frontend.
 
 ## 2. Prepare or obtain the verified archive
 
-Use the current handover's archive path and SHA-256 if an export has already been prepared. The older full-package archive is bound to its preceding source/lock and cannot serve the updated CPU deployment. Keep it for rollback with that matching deployment. To make a fresh export, use the cloud Python 3.12 CPU environment from this checkout, keeping the original full-XGBoost environment separate:
+Use the handover's archive path and SHA-256 if an export has already been prepared. To make a fresh export, run from this source checkout using the trusted original environment:
 
 ```powershell
-$previousUvProjectEnvironment = $env:UV_PROJECT_ENVIRONMENT
-try {
-  $env:UV_PROJECT_ENVIRONMENT = '.venv-cloud'
-  uv sync --frozen --no-dev
-} finally {
-  $env:UV_PROJECT_ENVIRONMENT = $previousUvProjectEnvironment
-}
-.venv-cloud/Scripts/python.exe scripts/export_release.py `
+& 'C:/path/to/original-project/.venv/Scripts/python.exe' scripts/export_release.py `
   --source-run 'C:/path/to/original-project/dumped_models/classification/runs/e7dcdcc3551e46fc93582836f4a74976' `
   --output 'C:/private-release-storage/iap-inference-unique-release.tar'
 ```
@@ -34,13 +27,12 @@ Keep the printed `sha256`, byte size and `source_manifest_sha256` with the deplo
 Before uploading, verify the original/cloud vectors and exact labels on all five synthetic MIME samples in separate seeded children:
 
 ```powershell
-.venv-cloud/Scripts/python.exe scripts/verify_release.py `
+& 'C:/path/to/original-project/.venv/Scripts/python.exe' scripts/verify_release.py `
   --source-run 'C:/path/to/original-project/dumped_models/classification/runs/e7dcdcc3551e46fc93582836f4a74976' `
-  --archive 'C:/private-release-storage/iap-inference-unique-release.tar' `
-  --reference-python 'C:/path/to/original-project/.venv/Scripts/python.exe'
+  --archive 'C:/private-release-storage/iap-inference-unique-release.tar'
 ```
 
-Expect `"parity":"passed"`, `"comparison":"full_xgboost_vs_cpu"` and `"sample_count":5`, with runtime evidence identifying full `xgboost` in the reference interpreter and `xgboost-cpu` in the cloud interpreter. Save the output with the source/archive handover. Export and cloud loading require the committed CPU dependency lock. The `.venv-cloud` environment is separate from the local full-package `.venv`; do not replace either with the other's dependencies. Both interpreters must access these source/sample paths on the same operating system. For Linux/Vercel qualification, use `.venv-cloud/bin/python` and the separate full environment's `.venv/bin/python`. An explicit CPU-only reference is rejected. Omitting `--reference-python` identifies the comparison as `same_environment` and does not establish full-versus-CPU parity. Reference failures report a bounded safe stage, without credential/path/email exception details. Local parity is separate from hosted acceptance.
+Expect `"parity":"passed"` and `"sample_count":5`. Save the output with the source/archive handover. Export and parity require an environment matching the committed dependency lock; local parity is separate from hosted acceptance.
 
 The archive contains `release.json`, the unchanged original `manifest.json`, `model_dbow.pkl`, `feature_scaler.pkl` and `XGBoost.pkl`. Its uncompressed streaming TAR avoids holding an archive and extracted model together in ephemeral storage. Download/extraction is capped at 384 MiB; metadata is capped at 1 MiB per file. Cache recovery rechecks artifact hashes and reconstructs the canonical archive digest, binding all provenance back to the configured pin. URLs must be private Blob HTTPS URLs without query strings; redirects are refused.
 
