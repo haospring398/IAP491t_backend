@@ -72,8 +72,7 @@
         "backendReserveMs",
         "clockSkewMs",
         "terminateMs",
-        "killReapMs",
-        "handlerSeconds"
+        "killReapMs"
       ],
       "properties": {
         "browserMs": {
@@ -105,10 +104,6 @@
           "minimum": 1
         },
         "killReapMs": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "handlerSeconds": {
           "type": "integer",
           "minimum": 1
         }

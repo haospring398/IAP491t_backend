@@ -2,7 +2,6 @@
 import asyncio
 import contextlib
 import hmac
-import json
 import logging
 import multiprocessing
 import os
@@ -15,7 +14,7 @@ from fastapi.responses import JSONResponse
 from starlette.requests import ClientDisconnect
 
 from web.backend.adapter import worker, STARTUP_STAGES
-from web.backend.policy import POLICY, UUID, UNAVAILABLE_ERROR, RUN_ID, Rejection, validate_policy
+from web.backend.policy import POLICY, UUID, UNAVAILABLE_ERROR, Rejection, validate_policy
 
 FAILURE_STAGES = STARTUP_STAGES | {"CONFIGURATION_INVALID", "AUTH_CONFIGURATION", "WORKER_SPAWN", "WORKER_STARTUP_TIMEOUT", "WORKER_STARTUP_FAILED"}
 
@@ -37,8 +36,7 @@ def error_response(code, request_id, status=None, configured=True):
 
 
 class Supervisor:
-    def __init__(self, token, worker_target=worker, startup_wait=False, cleanup=None):
-        self.worker_target, self.startup_wait, self.cleanup = worker_target, startup_wait, cleanup
+    def __init__(self, token):
         self.token = token if token and all(33 <= ord(c) <= 126 for c in token) else None
         self.process = self.connection = self.startup = None
         self.ready = False
@@ -79,7 +77,7 @@ class Supervisor:
         child = None
         try:
             self.connection, child = ctx.Pipe()
-            self.process = ctx.Process(target=self.worker_target, args=(child, self.pinned, self.manifest_digest), daemon=True)
+            self.process = ctx.Process(target=worker, args=(child, self.pinned, self.manifest_digest), daemon=True)
             self.process.start()
             child.close()
             self.startup = asyncio.create_task(self._startup())
@@ -113,23 +111,11 @@ class Supervisor:
             if self.manifest_digest is not None and metadata["manifest_sha256"] != self.manifest_digest:
                 self.failure("RELEASE_CHANGED")
                 raise Rejection("MODEL_UNAVAILABLE")
-            if self.metadata is not None and metadata.get("archive_sha256") != self.metadata.get("archive_sha256"):
-                self.failure("RELEASE_CHANGED")
-                raise Rejection("MODEL_UNAVAILABLE")
             self.metadata = metadata
             self.pinned = metadata["run"]
             self.manifest_digest = metadata["manifest_sha256"]
             self.ready = True
             self.last_failure = None
-            if self.startup_wait:
-                from web.backend.cloud_release import PACKAGES
-                record = {"run_id": RUN_ID, "manifest_sha256": metadata["manifest_sha256"],
-                          "archive_sha256": metadata.get("archive_sha256"),
-                          "python_version": metadata.get("python_version"),
-                          "packages": {name: metadata.get("packages", {}).get(name) for name in PACKAGES},
-                          "initialization_seconds": metadata.get("initialization_seconds"),
-                          "peak_rss_kib": metadata.get("peak_rss_kib")}
-                logging.getLogger("backend.startup").warning("Model worker ready: %s", json.dumps(record, sort_keys=True))
         except asyncio.TimeoutError:
             self.failure("WORKER_STARTUP_TIMEOUT")
             await self._reap()
@@ -160,16 +146,8 @@ class Supervisor:
         if self.connection:
             self.connection.close()
             self.connection = None
-        if self.cleanup is not None:
-            self.cleanup()
-
-    async def _stop_startup(self):
-        if self.startup and not self.startup.done():
-            self.startup.cancel()
-            await asyncio.gather(self.startup, return_exceptions=True)
 
     async def recycle(self):
-        await self._stop_startup()
         await self._reap()
         self.launch()
 
@@ -204,8 +182,7 @@ class Supervisor:
             raise Rejection("INVALID_REQUEST")
         if remaining <= limits["backendReserveMs"]:
             raise Rejection("ANALYSIS_TIMEOUT")
-        return (remaining - limits["backendReserveMs"] if self.startup_wait else
-                min(limits["backendMs"], remaining - limits["backendReserveMs"])) / 1000
+        return min(limits["backendMs"], remaining - limits["backendReserveMs"]) / 1000
 
     async def analyze(self, request):
         request_id = str(uuid.uuid4())
@@ -213,30 +190,20 @@ class Supervisor:
         try:
             request_id = self.identity(request)
             self.authorize(request)
-            self.budget(request)
+            budget = self.budget(request)
             if self.active_id is not None:
                 raise Rejection("SERVICE_BUSY")
-            dead_worker = self.ready and self.process and not self.process.is_alive()
-            retry_download = (self.startup_wait and not self.ready and not self.starting and
-                              self.last_failure == "CLOUD_DOWNLOAD")
-            if dead_worker or retry_download:
-                # Admission is claimed before recovery yields: one authenticated
-                # request can retry a demonstrated download failure, with no queue.
-                self.active_id, self.phase = request_id, "starting"
-                admitted = True
+            if self.ready and self.process and not self.process.is_alive():
+                # Claim recovery before yielding, preventing concurrent reloads.
                 self.ready = False
                 await self.recycle()
-                if not self.startup_wait:
-                    raise Rejection("MODEL_UNAVAILABLE")
-            if not self.ready and not (self.startup_wait and self.starting and self.startup):
                 raise Rejection("MODEL_UNAVAILABLE")
-            if not self.process or not self.process.is_alive():
+            if not self.ready or not self.process or not self.process.is_alive():
                 raise Rejection("MODEL_UNAVAILABLE")
             # No await between readiness check and admission. No request body read yet.
             self.active_id, self.phase = request_id, "receiving"
             admitted = True
             try:
-                budget = self.budget(request)
                 result = await asyncio.wait_for(self._job(request), budget)
             except (asyncio.TimeoutError, ClientDisconnect):
                 await self.recycle()
@@ -245,7 +212,7 @@ class Supervisor:
                 await asyncio.shield(self.recycle())
                 raise
             except Rejection as error:
-                if error.code == "MODEL_UNAVAILABLE" and (not self.startup_wait or self.last_failure is None):
+                if error.code == "MODEL_UNAVAILABLE":
                     await self.recycle()
                 raise
             except Exception:
@@ -271,18 +238,6 @@ class Supervisor:
                 raise Rejection("EMAIL_TOO_LARGE")
             body.extend(chunk)
         async def inference():
-            if self.startup_wait and not self.ready:
-                self.phase = "starting"
-                await asyncio.shield(self.startup)
-                if not self.ready or not self.process or not self.process.is_alive():
-                    raise Rejection("MODEL_UNAVAILABLE")
-            if self.startup_wait:
-                # Startup and upload spend the trusted proxy budget. Inference
-                # still receives at most the unchanged 60-second backend budget.
-                return await asyncio.wait_for(model_result(), min(self.budget(request), POLICY["deadlines"]["backendMs"] / 1000))
-            return await model_result()
-
-        async def model_result():
             await asyncio.to_thread(self.connection.send, (bytes(body), content_type))
             kind, _ = await self._message()
             if kind != "processing":
@@ -314,9 +269,8 @@ class Supervisor:
             await asyncio.gather(task, disconnect, return_exceptions=True)
 
 
-def create_app(token=None, *, worker_target=worker, startup_wait=False, cleanup=None):
-    supervisor = Supervisor(os.environ.get("ML_API_TOKEN") if token is None else token,
-                            worker_target, startup_wait, cleanup)
+def create_app(token=None):
+    supervisor = Supervisor(os.environ.get("ML_API_TOKEN") if token is None else token)
 
     @asynccontextmanager
     async def lifespan(app):

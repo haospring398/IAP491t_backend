@@ -47,7 +47,7 @@ def validate_policy():
         validator.validate({"request_id": request_id, "error": {"code": code, "message": entry["message"]}})
     d, limits = POLICY["deadlines"], POLICY["limits"]
     if not (limits["fileBytes"] < limits["multipartBytes"] and
-            d["backendMs"] < d["proxyMs"] < d["browserMs"] < d["handlerSeconds"] * 1000 and
+            d["backendMs"] < d["proxyMs"] < d["browserMs"] and
             d["backendReserveMs"] >= d["clockSkewMs"] + d["terminateMs"] + d["killReapMs"]):
         raise ValueError("Inconsistent transport bounds")
     inputs = {"INVALID_REQUEST", "EMAIL_TOO_LARGE", "EMPTY_EMAIL", "INVALID_EMAIL", "INSUFFICIENT_CONTENT", "RESOURCE_LIMIT"}

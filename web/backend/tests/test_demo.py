@@ -12,6 +12,7 @@ import runpy
 import time
 import unittest
 import uuid
+import weakref
 from unittest.mock import AsyncMock, Mock, PropertyMock, patch
 
 from fastapi.testclient import TestClient
@@ -51,6 +52,58 @@ def repeatability_child(connection, ordered):
         connection.send((False, type(exc).__name__))
     finally:
         connection.close()
+
+
+class WorkerUploadLifetime(unittest.TestCase):
+    def test_raw_upload_released_before_next_receive_after_success_and_rejection(self):
+        class TrackedUpload(bytearray):
+            pass
+
+        for rejected in (False, True):
+            with self.subTest(rejected=rejected):
+                case = self
+
+                class Connection:
+                    def __init__(self):
+                        self.upload = None
+                        self.messages = []
+                        self.closed = False
+                        self.checked_next_receive = False
+
+                    def recv(self):
+                        if self.upload is None:
+                            body = TrackedUpload(b"transient raw upload")
+                            self.upload = weakref.ref(body)
+                            return body, "multipart/form-data; boundary=test"
+                        self.checked_next_receive = True
+                        case.assertIsNone(self.upload(), "worker retained raw upload while waiting for its next request")
+                        raise EOFError
+
+                    def send(self, message):
+                        self.messages.append(message)
+
+                    def close(self):
+                        self.closed = True
+
+                class Model:
+                    metadata = {}
+
+                    def analyze(self, parsed):
+                        case.assertEqual(parsed, b"parsed email")
+                        if rejected:
+                            raise Rejection("INVALID_EMAIL")
+                        return {"analysis_status": "completed", "label": "legit"}
+
+                connection = Connection()
+                # Plain replacements avoid mock call histories retaining the body.
+                with patch("web.backend.adapter.Adapter", new=lambda *_: Model()), \
+                     patch("web.backend.adapter.multipart_email", new=lambda *_: b"parsed email"):
+                    worker(connection, None)
+                self.assertTrue(connection.checked_next_receive)
+                self.assertTrue(connection.closed)
+                expected = ("error", "INVALID_EMAIL") if rejected else (
+                    "success", {"analysis_status": "completed", "label": "legit"})
+                self.assertEqual(connection.messages, [("ready", {}), ("processing", None), expected])
 
 
 class Boundaries(unittest.TestCase):

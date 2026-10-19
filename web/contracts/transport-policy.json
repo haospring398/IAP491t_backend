@@ -1,7 +1,7 @@
 {
   "version": 1,
   "limits": { "fileBytes": 2097152, "multipartBytes": 2162688, "mimeParts": 100, "mimeDepth": 20, "decodedBytes": 2097152, "tokens": 50000, "allowedParserDefects": [] },
-  "deadlines": { "browserMs": 165000, "proxyMs": 150000, "backendMs": 60000, "workerStartupMs": 120000, "backendReserveMs": 4000, "clockSkewMs": 2000, "terminateMs": 1000, "killReapMs": 1000, "handlerSeconds": 180 },
+  "deadlines": { "browserMs": 165000, "proxyMs": 150000, "backendMs": 60000, "workerStartupMs": 120000, "backendReserveMs": 4000, "clockSkewMs": 2000, "terminateMs": 1000, "killReapMs": 1000 },
   "retry": { "maxRetries": 2 },
   "polling": { "intervalMs": 2000, "maxPolls": 75, "timeoutMs": 3000 },
   "errors": {

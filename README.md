@@ -12,12 +12,6 @@ Python FastAPI email-analysis service extracted from the current PhishingEmailDe
 
 Model files, training/test artifacts, real email, datasets, tokens and virtual environments are excluded. The original project and its corpus/history are not copied into this repository.
 
-## Deploy the backend on Vercel
-
-The root `app.py` exposes the cloud FastAPI app using Python 3.12 and the committed `pyproject.toml`/`uv.lock`. Follow [the dashboard deployment guide](DEPLOYMENT.md) to provision the verified inference archive in private Vercel Blob, set the server environment and connect the frontend. The cloud worker downloads only the three inference artifacts after the exporter verifies the complete original run. No model binaries or credentials belong in this repository.
-
-Cloud startup is bounded and fails closed. Imports remain model-free; liveness can succeed while readiness is 503. Cloud preparation, local parity and actual Vercel acceptance are separate checks. The hosted backend is ready to use only after its HTTPS readiness and a real-model upload pass.
-
 ## Local setup
 
 Run commands from this repository root. Use Python 3.11:
@@ -61,6 +55,12 @@ Use the original `current.json` selecting this run. The current verifier checks 
 
 The actual classifier is XGBoost, with 100 Doc2Vec values followed by 40 same-run scaled engineered features. Labels are 0=legitimate and 1=spam_or_phishing; SpamAssassin spam is included in the positive class. Phishing-only accuracy has not been established. Legacy Doc2Vec inference uses the inherited one epoch and negative alpha/min_alpha; this export does not retrain or tune it.
 
+Wait for `/health/ready` to return HTTP 200 before the first Analyze. HTTP 503
+while the verified worker is starting is expected; retry the readiness check. If
+it stays unready, inspect the backend startup log and token, shared-policy and
+trusted-model configuration before restarting. Liveness alone does not mean the
+worker is ready.
+
 ## API and frontend connection
 
 - `GET /health/live`: process alive, HTTP 200.
@@ -72,9 +72,7 @@ Authenticated requests use `Authorization: Bearer <token>`. Analysis requires a 
 
 One authenticated analysis is admitted at a time, with no queue. Uploads stay in memory; the service does not fetch links/images or execute attachments. Input/MIME/token/deadline bounds and worker termination/recovery are shared with the frontend through the transport policy. No training or evaluation is run by requests.
 
-For local frontend use, set server-only `ML_API_URL=http://127.0.0.1:8000` and the same `ML_API_TOKEN`. For a frontend hosted on Vercel, the separately hosted backend must have an HTTPS URL reachable from Vercel. A developer's localhost is not reachable from Vercel. Use separate preview/production tokens and endpoints.
-
-The convenience entry point deliberately binds loopback and keeps its original full-run verification contract. Vercel uses the separate cloud worker and the bounded, digest-pinned inference release described in the deployment guide. Account configuration and live startup/memory/deadline verification remain deployment prerequisites.
+For local frontend use, set server-only `ML_API_URL=http://127.0.0.1:8000` and the same `ML_API_TOKEN`. The entry point binds loopback and retains full-run verification. Any future hosting choice requires separate packaging, reachability, access and resource qualification; no host is selected by this repository. Use distinct environment secrets and endpoints.
 
 ## Verification
 

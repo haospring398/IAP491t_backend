@@ -13,8 +13,7 @@ from importlib.metadata import version
 from web.backend.policy import POLICY, ROOT, RUN_ID, Rejection
 
 STARTUP_STAGES = frozenset({"DEPENDENCY_LOAD", "RUN_VERIFICATION", "RELEASE_CHANGED", "ARTIFACT_BYTES",
-                           "ARTIFACT_LOAD", "MODEL_COMPATIBILITY", "INFERENCE_SETTINGS", "PROVENANCE",
-                           "CLOUD_CONFIGURATION", "CLOUD_DOWNLOAD", "CLOUD_INTEGRITY"})
+                           "ARTIFACT_LOAD", "MODEL_COMPATIBILITY", "INFERENCE_SETTINGS", "PROVENANCE"})
 
 
 class StartupFailure(ValueError):
@@ -187,17 +186,6 @@ class Adapter:
         if manifest != json.loads(manifest_bytes):
             self.startup_stage = "RELEASE_CHANGED"
             raise ValueError("Manifest changed during verification")
-        self._load_verified(run, manifest)
-
-    def _load_verified(self, run, manifest, run_identity=None):
-        """Shared inference after the caller verifies its complete release contract."""
-        import artifact_store
-        import preprocess
-        import numpy as np
-        from gensim.models.doc2vec import Doc2Vec
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
-        from xgboost import XGBClassifier
         loaded = []
         for name in ("model_dbow.pkl", "feature_scaler.pkl", "XGBoost.pkl"):
             self.startup_stage = "ARTIFACT_BYTES"
@@ -231,7 +219,7 @@ class Adapter:
             raise ValueError("Manifest changed during loading")
         self.startup_stage = "PROVENANCE"
         self.metadata = {
-            "run": run_identity or str(run.relative_to(ROOT) if run.is_absolute() else run),
+            "run": str(run.relative_to(ROOT) if run.is_absolute() else run),
             "manifest_sha256": self.release, "feature_width": manifest["feature_width"],
             "doc2vec_size": self.doc.vector_size, "engineered_size": self.scaler.n_features_in_,
             "alpha": self.alpha, "min_alpha": self.min_alpha, "epochs": self.epochs,
@@ -284,11 +272,6 @@ def worker(connection, pinned, expected_manifest=None):
         connection.send(("unavailable", stage))
         connection.close()
         return
-    serve(connection, adapter)
-
-
-def serve(connection, adapter):
-    """The local and cloud workers share the identical serial request loop."""
     try:
         while True:
             body, content_type = connection.recv()
