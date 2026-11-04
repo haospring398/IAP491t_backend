@@ -1,0 +1,4 @@
+# Chữ ký tiền xử lý băm từng byte của các file này; không cho git đổi xuống dòng (LF/CRLF).
+backend/frozen_pipeline/*.py -text
+# Run fixture của test backend: manifest băm từng byte của các artifact (kể cả CSV).
+backend/tests/fixture_run/** -text

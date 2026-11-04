@@ -1,0 +1,20 @@
+pandas
+numpy
+scikit-learn
+scipy
+gensim
+xgboost
+beautifulsoup4
+textblob
+nltk
+seaborn
+matplotlib
+tqdm
+requests
+bs4
+# BERT (khop run 2026-10-19_bert); ban CUDA cai theo README
+torch==2.10.0
+transformers==4.57.6
+safetensors
+# Phan tich macro tinh cho feature tep dinh kem (olevba; khong chay macro)
+oletools>=0.60,<0.61

@@ -1,0 +1,6 @@
+From: notice@example.test
+To: reader@example.test
+Subject: Account notice
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Please review your account notice.</p><a href="https://example.test/account">View notice</a><img src="https://example.test/remote.png"></body></html>

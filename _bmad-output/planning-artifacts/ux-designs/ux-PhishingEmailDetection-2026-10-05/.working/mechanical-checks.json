@@ -1,0 +1,29 @@
+{
+  "status": "pass",
+  "token_references": 20,
+  "hex_colors": 11,
+  "matched_components": 9,
+  "local_links_checked": 60,
+  "section_order_checked": true,
+  "draft_status_checked": true,
+  "frontmatter_check": "lexical mapping and source paths; full YAML parser not available",
+  "problems": [],
+  "assumption_markers_checked": [
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5"
+  ],
+  "correction": "Added explicit ASSUMPTION tags to all five open-choice register rows; targeted recheck passed.",
+  "graph_update": {
+    "status": "pass",
+    "all_local_links_checked_after_graph_import": 78,
+    "image_sha256": "A5649657FE85867616CE388389F958DEEB439BAD8066AE11B46D6D18E82C911E",
+    "image_unchanged_from_supplied_original": true,
+    "image_registered_and_linked_in_both_spines": true,
+    "current_missing_image_claims_removed": true,
+    "draft_status_preserved": true,
+    "problems": []
+  }
+}

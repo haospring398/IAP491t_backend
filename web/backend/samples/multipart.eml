@@ -1,0 +1,14 @@
+From: alex@example.test
+Subject: Project update
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary=sample-alternative
+
+--sample-alternative
+Content-Type: text/plain; charset=utf-8
+
+The project update is ready for your review.
+--sample-alternative
+Content-Type: text/html; charset=utf-8
+
+<p>The project update is ready for your <strong>review</strong>.</p>
+--sample-alternative--

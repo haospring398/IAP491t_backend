@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+
+# Môi trường Python riêng của web/ và run đóng gói bằng scripts/bundle-run.py (lớn)
+/.venv/
+/model/

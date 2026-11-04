@@ -1,0 +1,335 @@
+{
+  "snapshot": "web-development-handover",
+  "files": [
+    {
+      "source": "docs/IAP_Web_Application_Plan.md",
+      "snapshot": "IAP_Web_Application_Plan.md",
+      "sourceSha256": "147f1804bc15ea05f4281338b41e6e5fb3ad31c0adf6d341c27affa6ee78cfb4",
+      "snapshotSha256": "147f1804bc15ea05f4281338b41e6e5fb3ad31c0adf6d341c27affa6ee78cfb4"
+    },
+    {
+      "source": "AGENTS.md",
+      "snapshot": "PROJECT-CONTEXT.md",
+      "sourceSha256": "7fbdccdddca1c3eae05151e7c8f5e5e1694c1fa501204ae85fee7d55c5adde2b",
+      "snapshotSha256": "7fbdccdddca1c3eae05151e7c8f5e5e1694c1fa501204ae85fee7d55c5adde2b"
+    },
+    {
+      "source": "_bmad-output/implementation-artifacts/spec-integrate-zip-frontend.md",
+      "snapshot": "implementation/spec-integrate-zip-frontend.md",
+      "sourceSha256": "fefc489ad39240cb5bac07ee3f25cb0ac0ef8b564f494ccd564b70bccf6cd5e8",
+      "snapshotSha256": "fefc489ad39240cb5bac07ee3f25cb0ac0ef8b564f494ccd564b70bccf6cd5e8"
+    },
+    {
+      "source": "_bmad-output/implementation-artifacts/spec-local-real-model-demo.md",
+      "snapshot": "implementation/spec-local-real-model-demo.md",
+      "sourceSha256": "8a0efa93722aae70e393db278feca099ba94671be0505e5488ade2da638bc5c0",
+      "snapshotSha256": "8a0efa93722aae70e393db278feca099ba94671be0505e5488ade2da638bc5c0"
+    },
+    {
+      "source": "_bmad-output/implementation-artifacts/spec-move-backend-to-web.md",
+      "snapshot": "implementation/spec-move-backend-to-web.md",
+      "sourceSha256": "eda77092c0271632844d133c8e7ba864a690a721f866569604c8b026c147f602",
+      "snapshotSha256": "eda77092c0271632844d133c8e7ba864a690a721f866569604c8b026c147f602"
+    },
+    {
+      "source": "web/backend/README.md",
+      "snapshot": "backend/README.md",
+      "sourceSha256": "13ea26443624fa66ad30e2407932b9fda567fe9bc2d83c9544c4cae58fe534bb",
+      "snapshotSha256": "fc34f3f6cee1c9c28ba7a914f91978a78648451fda957bac781856ac6fce9d91"
+    },
+    {
+      "source": "_bmad-output/specs/spec-iap-web-application/.memlog.md",
+      "snapshot": "spec/.memlog.md",
+      "sourceSha256": "aee9628b9828ab3d1531073b2d5528c87a4cf5a05ed03f37fee0b34a2921d661",
+      "snapshotSha256": "aee9628b9828ab3d1531073b2d5528c87a4cf5a05ed03f37fee0b34a2921d661"
+    },
+    {
+      "source": "_bmad-output/specs/spec-iap-web-application/api-and-experience.md",
+      "snapshot": "spec/api-and-experience.md",
+      "sourceSha256": "f094b9a9eec380cda02210a0c6432b583e474f8db0e5a8ba2ae92758d10486db",
+      "snapshotSha256": "991574cccf0ac24fe5b035748c7860c4b259901f78d52237fcd80b296e0844e6"
+    },
+    {
+      "source": "_bmad-output/specs/spec-iap-web-application/brownfield-and-evidence.md",
+      "snapshot": "spec/brownfield-and-evidence.md",
+      "sourceSha256": "e0ebd7ea07af2abf29a0fd739b556646bdacf3fcce0fad873a9ed935e45d7e29",
+      "snapshotSha256": "e50fa92f0dcc4c64ae6b2c870c0efd2face68567d7d669680e089a3b3b03b46b"
+    },
+    {
+      "source": "_bmad-output/specs/spec-iap-web-application/deployment-and-acceptance.md",
+      "snapshot": "spec/deployment-and-acceptance.md",
+      "sourceSha256": "3ee1f32f0a6c871153f3cf7db3fdf863d8103c4d37a230a8003fed500b898d86",
+      "snapshotSha256": "a9b3d7c7cef63fe986b4042d4304880056813bcb6d09d4db9f570350b91936c9"
+    },
+    {
+      "source": "_bmad-output/specs/spec-iap-web-application/local-demo.md",
+      "snapshot": "spec/local-demo.md",
+      "sourceSha256": "0bc642c29dadf98d9c00f494818a13bdad7f87db243e4250d131790130851516",
+      "snapshotSha256": "0bc642c29dadf98d9c00f494818a13bdad7f87db243e4250d131790130851516"
+    },
+    {
+      "source": "_bmad-output/specs/spec-iap-web-application/model-and-inference.md",
+      "snapshot": "spec/model-and-inference.md",
+      "sourceSha256": "7f05a20ab8eab646b8a101392c4d8c68013de46b7b6645a5d65332db3393ad83",
+      "snapshotSha256": "10f5037ddca92afe091d7928a76a46c935b0437638c8e15f4f66824f7deb7595"
+    },
+    {
+      "source": "_bmad-output/specs/spec-iap-web-application/SPEC.md",
+      "snapshot": "spec/SPEC.md",
+      "sourceSha256": "427e9cfc219ec662ab6723f09915c25218bd55acec1e165cec44fd47e1b366e7",
+      "snapshotSha256": "d9e0b4294f73d79185bb73df98550481d85b631e4e578d6666ed10b94acc3c6c"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.memlog.md",
+      "snapshot": "ux/.memlog.md",
+      "sourceSha256": "e7d54173c6524e9aff20c1d2f08ad23a56c30867bf02a3c7e6a1edb368917a11",
+      "snapshotSha256": "e7d54173c6524e9aff20c1d2f08ad23a56c30867bf02a3c7e6a1edb368917a11"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/coverage-pass1.md",
+      "snapshot": "ux/.working/coverage-pass1.md",
+      "sourceSha256": "bc48846fb239bc1cf1789d43b82b012287823fba0268e722c95ecd195163e4e5",
+      "snapshotSha256": "bc48846fb239bc1cf1789d43b82b012287823fba0268e722c95ecd195163e4e5"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/editorial-remove-export-guidance.json",
+      "snapshot": "ux/.working/editorial-remove-export-guidance.json",
+      "sourceSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "snapshotSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/editorial-remove-export-guidance.md",
+      "snapshot": "ux/.working/editorial-remove-export-guidance.md",
+      "sourceSha256": "54ca360b934d3b39c50a8165bc6f50635ff02e343fadcb5e0b74199a6de9dafd",
+      "snapshotSha256": "54ca360b934d3b39c50a8165bc6f50635ff02e343fadcb5e0b74199a6de9dafd"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/export-guidance-removal-review-input.md",
+      "snapshot": "ux/.working/export-guidance-removal-review-input.md",
+      "sourceSha256": "115359c9941b8c592f5bcd0a24c8f0419ea4c3422c7c4f3628b48d2385c72799",
+      "snapshotSha256": "50868783972f2f82507f26ec598a1bde274bfc9fdb513540ea813fa26308d2b7"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/mechanical-checks.json",
+      "snapshot": "ux/.working/mechanical-checks.json",
+      "sourceSha256": "0aabd1b8e594391866fe17b68176b469aae4e2076f70a23358220b4330f50c5b",
+      "snapshotSha256": "0aabd1b8e594391866fe17b68176b469aae4e2076f70a23358220b4330f50c5b"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/source-graph-image.md",
+      "snapshot": "ux/.working/source-graph-image.md",
+      "sourceSha256": "9688f6b4834c3a983bf4a26c50a51089017c7fe7707303adad394776b47ead97",
+      "snapshotSha256": "c46ffcc872c2a0ab8ef50c84c721fcc8f65baa3f42a0c798984453f8004b043a"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/source-plan-graph.md",
+      "snapshot": "ux/.working/source-plan-graph.md",
+      "sourceSha256": "5313823669387feff0bdf26f8fc20017a81c80a0cdd833f70f2fe69103632b29",
+      "snapshotSha256": "f6b82ff5e85d1e3887e6094cd08c140ebd65a036c9238eeeb64b286aa998475d"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/source-prd.md",
+      "snapshot": "ux/.working/source-prd.md",
+      "sourceSha256": "b1419eef3c980cab9d37a9c039df567e38811ce5efba90ff5ec6d6df59386921",
+      "snapshotSha256": "844e1e9ee7d27187366944f7dc8cd55a592592ad7443ef6ea3e82aeed145472e"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/source-spec.md",
+      "snapshot": "ux/.working/source-spec.md",
+      "sourceSha256": "58c8f28984caa0dde8f8e2ef014f87bc1b9dd0c746113e4e2d61a3c55cd2f124",
+      "snapshotSha256": "8d9bfb3fa9a7570e9cac48230c763f5360e4af093acf75f8f04bacdba8ff78e4"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/.working/user-intake.md",
+      "snapshot": "ux/.working/user-intake.md",
+      "sourceSha256": "51ab0e9665a8f043003232022428d2e89c40f7aeda9d9bd9e0b66de2fba33eb1",
+      "snapshotSha256": "51ab0e9665a8f043003232022428d2e89c40f7aeda9d9bd9e0b66de2fba33eb1"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/DESIGN.md",
+      "snapshot": "ux/DESIGN.md",
+      "sourceSha256": "c0430c070f610f479e1ac02a458ee3276382f818a67dbd954e999bf4a5818bb7",
+      "snapshotSha256": "f021ad238d7655a8453f4935d5e62ab6acdb70e4c9586361ef8959cf05b027cb"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/EXPERIENCE.md",
+      "snapshot": "ux/EXPERIENCE.md",
+      "sourceSha256": "82b5f5d39c3f0e0bfaf015147c4b949d8f7a13d970c21885d79da5402cb9b750",
+      "snapshotSha256": "f63e5f91e0c92c967d6cdff45c69d2bbed1396903f8d961cf2beb696baaf3b44"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/imports/graph-iap419t.png",
+      "snapshot": "ux/imports/graph-iap419t.png",
+      "sourceSha256": "a5649657fe85867616ce388389f958deeb439bad8066ae11b46d6d18e82c911e",
+      "snapshotSha256": "a5649657fe85867616ce388389f958deeb439bad8066ae11b46d6d18e82c911e"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/reconcile-plan-graph.md",
+      "snapshot": "ux/reconcile-plan-graph.md",
+      "sourceSha256": "ebc6c30f571af720daed8dccf256f7c9bb49b5c8aa4013342b8412a015b6bbfa",
+      "snapshotSha256": "e6e634990d8db387fe4e0193b2ce27541bca3c6eb4f93abc1fca8c265491ea4c"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/reconcile-prd.md",
+      "snapshot": "ux/reconcile-prd.md",
+      "sourceSha256": "aef73f4ef9f452b92c7ff7814a40ae13e805643ee9a6e4b8d2401cf59cdc9e45",
+      "snapshotSha256": "3e290c8e398f4cfa1282f1e4448e4254cb76966d541ad023b90b7d9955a08032"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/reconcile-remove-export-guidance.md",
+      "snapshot": "ux/reconcile-remove-export-guidance.md",
+      "sourceSha256": "b22f7f955356443d2e6ffe68efbd14be22c62bfada3758f8cca4460e8cd0c8fe",
+      "snapshotSha256": "1d53f517021e61aa64c9729b512fadbe4bc30d392d42327dccc221cad18917ec"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/reconcile-spec.md",
+      "snapshot": "ux/reconcile-spec.md",
+      "sourceSha256": "bd696ecd0fb1877891d9134dcdb7ff1cf23e6ccb0b9c70e3c95df42323817bef",
+      "snapshotSha256": "0b83153c06ec5cc87b5137bafbfcb602c88bff455bb8ccabd27e18acb4a0741d"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/ux-designs/ux-PhishingEmailDetection-2026-10-05/review-editorial.md",
+      "snapshot": "ux/review-editorial.md",
+      "sourceSha256": "4e0fedc308182ab04217ac264206208cae1cc9462f7084a9584f8ebf5565f608",
+      "snapshotSha256": "4e0fedc308182ab04217ac264206208cae1cc9462f7084a9584f8ebf5565f608"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/.memlog.md",
+      "snapshot": "architecture/.memlog.md",
+      "sourceSha256": "d11166a225f75dbc507c2fdde1ccaa6454c4c7d5acc19cdcc34764715208b817",
+      "snapshotSha256": "d11166a225f75dbc507c2fdde1ccaa6454c4c7d5acc19cdcc34764715208b817"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/.working/brownfield-audit.md",
+      "snapshot": "architecture/.working/brownfield-audit.md",
+      "sourceSha256": "c67813041b585ae95ce708aba5defc5e1c6b830ccdce2ee4af1b4906436065a4",
+      "snapshotSha256": "c67813041b585ae95ce708aba5defc5e1c6b830ccdce2ee4af1b4906436065a4"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/.working/frontend-hosting-research.md",
+      "snapshot": "architecture/.working/frontend-hosting-research.md",
+      "sourceSha256": "69744d3c3c3ca1a7d5b34334fd94c651c8f5956216f26b44ef138cdbf20ff1ef",
+      "snapshotSha256": "69744d3c3c3ca1a7d5b34334fd94c651c8f5956216f26b44ef138cdbf20ff1ef"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/.working/input-contracts.md",
+      "snapshot": "architecture/.working/input-contracts.md",
+      "sourceSha256": "a6e58c5b946331b4da51ac69098d6957795affecaefa8fef49160fffc5be341e",
+      "snapshotSha256": "a6e58c5b946331b4da51ac69098d6957795affecaefa8fef49160fffc5be341e"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/.working/python-service-research.md",
+      "snapshot": "architecture/.working/python-service-research.md",
+      "sourceSha256": "d04bcaffa736548e5eb7c2a415d78bc5727522e8d7da6ba6aca6fc857aae5e52",
+      "snapshotSha256": "d04bcaffa736548e5eb7c2a415d78bc5727522e8d7da6ba6aca6fc857aae5e52"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/.working/validation.json",
+      "snapshot": "architecture/.working/validation.json",
+      "sourceSha256": "0cf2a72ee0cd23eeaa1119b3133d9baf4702324cc7fa37cf29c6ecae590f44f9",
+      "snapshotSha256": "0cf2a72ee0cd23eeaa1119b3133d9baf4702324cc7fa37cf29c6ecae590f44f9"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/ARCHITECTURE-SPINE.md",
+      "snapshot": "architecture/ARCHITECTURE-SPINE.md",
+      "sourceSha256": "ffdacf0f63d5ac3d76809c794ae4cc97db292b565f406097bf0e118ebacc5622",
+      "snapshotSha256": "a235dfb12a22ac77d986695a9e3e4064dc739efab848fc84af4d2200bec7ed3c"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/reconcile-brownfield.md",
+      "snapshot": "architecture/reconcile-brownfield.md",
+      "sourceSha256": "7f688c0b72dfa912a23b211186ab01ed731f69dbf09bd2499bed1742ebfa19bc",
+      "snapshotSha256": "7f688c0b72dfa912a23b211186ab01ed731f69dbf09bd2499bed1742ebfa19bc"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/reconcile-plan-graph.md",
+      "snapshot": "architecture/reconcile-plan-graph.md",
+      "sourceSha256": "7e2c04132f45e8a879605ac480fc43279c39306181771ae8b5d3c1d4e3231f28",
+      "snapshotSha256": "fa97576850970d12a3988bf81faa59e49ea8cc18affebfb647c36a58a078546c"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/reconcile-prd.md",
+      "snapshot": "architecture/reconcile-prd.md",
+      "sourceSha256": "1f578e6d8f76f70a766b2aaafd28416d2f2f0c10ea0cdea256af9422d9d37aca",
+      "snapshotSha256": "d5b1050cd49490b1704b00bfc1999e2a831a58f54d3ba506c2007e7131d49d8a"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/reconcile-spec.md",
+      "snapshot": "architecture/reconcile-spec.md",
+      "sourceSha256": "5d9b1b7a4911a60c90bd7fa3aace2e56a0ff903fed89272d87684f531725d5f0",
+      "snapshotSha256": "e2515b8463e1b3d90b3975d55bdaaa5a6998deabe37a8cab97fef1eeff80dba8"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/reconcile-ux.md",
+      "snapshot": "architecture/reconcile-ux.md",
+      "sourceSha256": "3cd2efefafc9103b133c004b21be625ca64a318e2e30b80fc9ccf6d509c947f0",
+      "snapshotSha256": "74cca9a0d099a6f579a01d5220e18a31dfcc7ec8a76c4a343c0f868ddc62c5fe"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/reviews/review-current-tech.md",
+      "snapshot": "architecture/reviews/review-current-tech.md",
+      "sourceSha256": "867037b7b787dee29fa264fda12afea4c1509ae33ca0bba3fc213587aa26b720",
+      "snapshotSha256": "867037b7b787dee29fa264fda12afea4c1509ae33ca0bba3fc213587aa26b720"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/reviews/review-rubric.md",
+      "snapshot": "architecture/reviews/review-rubric.md",
+      "sourceSha256": "2058692bdd3b0baeb6b5b23000cd3ba2124de27e8731462dadc9023f1553757a",
+      "snapshotSha256": "a50cff4b32172ec96a628d338bf7ed9acab0cf79b06a5c44082a4482c77c2fdb"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/architecture/architecture-PhishingEmailDetection-2026-10-05/reviews/review-seams.md",
+      "snapshot": "architecture/reviews/review-seams.md",
+      "sourceSha256": "f26fd42c5aeea60612427b3d881325063da5dba61cc1232a4cee8aa8952de394",
+      "snapshotSha256": "f26fd42c5aeea60612427b3d881325063da5dba61cc1232a4cee8aa8952de394"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/prds/prd-PhishingEmailDetection-2026-10-05/.memlog.md",
+      "snapshot": "prd/.memlog.md",
+      "sourceSha256": "8fb4f8f369b3c93632c2b243d119dde6cc09575e2a250adeb741b3b267e42d7a",
+      "snapshotSha256": "8fb4f8f369b3c93632c2b243d119dde6cc09575e2a250adeb741b3b267e42d7a"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/prds/prd-PhishingEmailDetection-2026-10-05/addendum.md",
+      "snapshot": "prd/addendum.md",
+      "sourceSha256": "58fdb0f2e849824703b4979644da2f44d275444b7593a163e1518e796286b4c8",
+      "snapshotSha256": "df1317094451da708a413e1fec3b37b042c2f575030be00a5bb332c02b89b15a"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/prds/prd-PhishingEmailDetection-2026-10-05/prd.md",
+      "snapshot": "prd/prd.md",
+      "sourceSha256": "1094584095535a1726c7f901d36357e8ccc911849a88272d39837772f07b2ef4",
+      "snapshotSha256": "3a64fccfdc881d716a493cf2de69017bf63ead141c239c3f3910c39a83f24fe8"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/prds/prd-PhishingEmailDetection-2026-10-05/reconcile-spec.md",
+      "snapshot": "prd/reconcile-spec.md",
+      "sourceSha256": "d2c316ea94926d01f44d575fe7d3872c7325d9ba39c247794f90848714bf2e3f",
+      "snapshotSha256": "d2c316ea94926d01f44d575fe7d3872c7325d9ba39c247794f90848714bf2e3f"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/prds/prd-PhishingEmailDetection-2026-10-05/reconcile-web-plan.md",
+      "snapshot": "prd/reconcile-web-plan.md",
+      "sourceSha256": "18a066007ab58db53c260f2ac44e2efe685516debae3e60df9573e220f886057",
+      "snapshotSha256": "7346c525bc801c9bca9910985cd08e681b22e63f991e0646e2fb94736a4441d5"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/prds/prd-PhishingEmailDetection-2026-10-05/review-editorial.json",
+      "snapshot": "prd/review-editorial.json",
+      "sourceSha256": "58e4c55d895ec7f105a8e97cf01f287a5cbcd17860c2bb63d83c2331e2d19067",
+      "snapshotSha256": "58e4c55d895ec7f105a8e97cf01f287a5cbcd17860c2bb63d83c2331e2d19067"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/prds/prd-PhishingEmailDetection-2026-10-05/review-editorial.md",
+      "snapshot": "prd/review-editorial.md",
+      "sourceSha256": "177951d7bbea5ce6341079b460b411066c9ad7569c7cf7968f5ea60d2a2ae2fc",
+      "snapshotSha256": "177951d7bbea5ce6341079b460b411066c9ad7569c7cf7968f5ea60d2a2ae2fc"
+    },
+    {
+      "source": "_bmad-output/planning-artifacts/prds/prd-PhishingEmailDetection-2026-10-05/review-rubric.md",
+      "snapshot": "prd/review-rubric.md",
+      "sourceSha256": "b9d5b29bb68489f471fcdbe2011addd04e7ce123677ef63d560d600c62cf6e33",
+      "snapshotSha256": "b9d5b29bb68489f471fcdbe2011addd04e7ce123677ef63d560d600c62cf6e33"
+    }
+  ]
+}

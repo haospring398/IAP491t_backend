@@ -1,0 +1,380 @@
+{
+  "run_id": "e7dcdcc3551e46fc93582836f4a74976",
+  "evidence": "User-provided train/evaluate terminal log",
+  "log_path": "C:\\Users\\PC\\Downloads\\result.txt",
+  "log_sha256": "4637b1c51f927c7d9d102e32b091b877942637c708d2ba6c6b782c52e4298126",
+  "manifest_sha256": "5407b0aac9118f8f0611205c7d84d773bd0af74f7107459d5ee2c37a19ec11bb",
+  "csv_sha256": "c47cf151bf5838de40e29859d9fc911d02a0aacac09a2b688611511182fc3a93",
+  "models_compared": 10,
+  "metrics_per_model": 5,
+  "comparison": "CSV agrees with terminal values rounded to six decimal places",
+  "absolute_tolerance": 5.000001e-07,
+  "full_recomputation": "Not required after user supplied successful evaluation log; cancelled",
+  "limitations": "Log comparison validates printed precision, not an independent full-precision recomputation; image contents were not recomputed.",
+  "comparisons": [
+    {
+      "model": "Logistic Regression",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.8641817359149985,
+          "log_value": 0.864182,
+          "absolute_difference": 2.640850015334095e-07
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.6812289438992236,
+          "log_value": 0.681229,
+          "absolute_difference": 5.610077635775923e-08
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.7461794552966187,
+          "log_value": 0.746179,
+          "absolute_difference": 4.552966186288643e-07
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.6266801414855988,
+          "log_value": 0.62668,
+          "absolute_difference": 1.414855987924568e-07
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.9148573748415307,
+          "log_value": 0.914857,
+          "absolute_difference": 3.7484153070366233e-07
+        }
+      ]
+    },
+    {
+      "model": "Random Forest",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.9406175401369884,
+          "log_value": 0.940618,
+          "absolute_difference": 4.5986301155931386e-07
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.8635402101036177,
+          "log_value": 0.86354,
+          "absolute_difference": 2.101036177259985e-07
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.9229030156722995,
+          "log_value": 0.922903,
+          "absolute_difference": 1.5672299458202588e-08
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.8113525349503116,
+          "log_value": 0.811353,
+          "absolute_difference": 4.6504968842508987e-07
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.9832147124404425,
+          "log_value": 0.983215,
+          "absolute_difference": 2.8755955749915074e-07
+        }
+      ]
+    },
+    {
+      "model": "XGBoost",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.9469130794314512,
+          "log_value": 0.946913,
+          "absolute_difference": 7.943145119426731e-08
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.883903437686599,
+          "log_value": 0.883903,
+          "absolute_difference": 4.3768659896414874e-07
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.8954372623574145,
+          "log_value": 0.895437,
+          "absolute_difference": 2.623574144600127e-07
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.8726629610914604,
+          "log_value": 0.872663,
+          "absolute_difference": 3.890853961241447e-08
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.9851512783667773,
+          "log_value": 0.985151,
+          "absolute_difference": 2.783667772954246e-07
+        }
+      ]
+    },
+    {
+      "model": "SVM",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.9036946312389809,
+          "log_value": 0.903695,
+          "absolute_difference": 3.6876101916494264e-07
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.7797227129168675,
+          "log_value": 0.779723,
+          "absolute_difference": 2.8708313259961926e-07
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.8289323924425221,
+          "log_value": 0.828932,
+          "absolute_difference": 3.924425221457639e-07
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.7360282971197575,
+          "log_value": 0.736028,
+          "absolute_difference": 2.971197574641593e-07
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.9574867450039201,
+          "log_value": 0.957487,
+          "absolute_difference": 2.549960799180795e-07
+        }
+      ]
+    },
+    {
+      "model": "KNN",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.9213408640569173,
+          "log_value": 0.921341,
+          "absolute_difference": 1.3594308267972366e-07
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.8268864280195725,
+          "log_value": 0.826886,
+          "absolute_difference": 4.280195724515323e-07
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.843172268907563,
+          "log_value": 0.843172,
+          "absolute_difference": 2.689075629946913e-07
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.8112177867609904,
+          "log_value": 0.811218,
+          "absolute_difference": 2.1323900956105035e-07
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.9506822755674514,
+          "log_value": 0.950682,
+          "absolute_difference": 2.755674514132167e-07
+        }
+      ]
+    },
+    {
+      "model": "Naive Bayes",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.7831510461360836,
+          "log_value": 0.783151,
+          "absolute_difference": 4.6136083509118464e-08
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.19997121888041444,
+          "log_value": 0.199971,
+          "absolute_difference": 2.1888041443207662e-07
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.6865612648221344,
+          "log_value": 0.686561,
+          "absolute_difference": 2.648221344436763e-07
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.11702880242546741,
+          "log_value": 0.117029,
+          "absolute_difference": 1.975745325816236e-07
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.7388051842375761,
+          "log_value": 0.738805,
+          "absolute_difference": 1.8423757608410085e-07
+        }
+      ]
+    },
+    {
+      "model": "Decision Tree",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.9173778727786186,
+          "log_value": 0.917378,
+          "absolute_difference": 1.272213814296208e-07
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.8219012225267796,
+          "log_value": 0.821901,
+          "absolute_difference": 2.2252677955858502e-07
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.8205627560271305,
+          "log_value": 0.820563,
+          "absolute_difference": 2.43972869573561e-07
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.8232440626579081,
+          "log_value": 0.823244,
+          "absolute_difference": 6.265790808424043e-08
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.8844954031728947,
+          "log_value": 0.884495,
+          "absolute_difference": 4.0317289462521444e-07
+        }
+      ]
+    },
+    {
+      "model": "MLP",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.9412338320877475,
+          "log_value": 0.941234,
+          "absolute_difference": 1.6791225254664255e-07
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.8648037473752221,
+          "log_value": 0.864804,
+          "absolute_difference": 2.5262477787446613e-07
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.9254436506107399,
+          "log_value": 0.925444,
+          "absolute_difference": 3.4938926019023597e-07
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.811622031328954,
+          "log_value": 0.811622,
+          "absolute_difference": 3.132895409763137e-08
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.982749210565313,
+          "log_value": 0.982749,
+          "absolute_difference": 2.1056531296359537e-07
+        }
+      ]
+    },
+    {
+      "model": "AdaBoost",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.8905262665189646,
+          "log_value": 0.890526,
+          "absolute_difference": 2.665189645645327e-07
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.7524039733930872,
+          "log_value": 0.752404,
+          "absolute_difference": 2.6606912784110648e-08
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.7899377593360996,
+          "log_value": 0.789938,
+          "absolute_difference": 2.4066390047483566e-07
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.7182752231766886,
+          "log_value": 0.718275,
+          "absolute_difference": 2.2317668857407824e-07
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.9481741727905035,
+          "log_value": 0.948174,
+          "absolute_difference": 1.7279050357199566e-07
+        }
+      ]
+    },
+    {
+      "model": "Gradient Boosting",
+      "metrics": [
+        {
+          "metric": "Accuracy",
+          "csv_value": 0.9183218136145913,
+          "log_value": 0.918322,
+          "absolute_difference": 1.8638540866255937e-07
+        },
+        {
+          "metric": "F1-score",
+          "csv_value": 0.8165668033217702,
+          "log_value": 0.816567,
+          "absolute_difference": 1.9667822981350724e-07
+        },
+        {
+          "metric": "Precision",
+          "csv_value": 0.8507282882488227,
+          "log_value": 0.850728,
+          "absolute_difference": 2.882488226996216e-07
+        },
+        {
+          "metric": "Recall",
+          "csv_value": 0.7850429509853462,
+          "log_value": 0.785043,
+          "absolute_difference": 4.901465389117732e-08
+        },
+        {
+          "metric": "ROC-AUC",
+          "csv_value": 0.9681216154768366,
+          "log_value": 0.968122,
+          "absolute_difference": 3.84523163421413e-07
+        }
+      ]
+    }
+  ],
+  "partial_recomputation": {
+    "status": "cancelled; three models completed",
+    "run_id": "e7dcdcc3551e46fc93582836f4a74976",
+    "manifest_sha256": "5407b0aac9118f8f0611205c7d84d773bd0af74f7107459d5ee2c37a19ec11bb",
+    "csv_sha256": "3f00416d9d97bbdec3f2a5ba0c775cc016a172bab2c023d2a5fa39caf5de6d61",
+    "models": [
+      "Logistic Regression",
+      "Random Forest",
+      "XGBoost"
+    ],
+    "comparison": "All completed rows match current report at full precision",
+    "command": "Temporary verification script; no longer retained",
+    "limitations": "No full ten-model recomputation completed; partial CSV does not independently establish provenance for the remaining models."
+  }
+}

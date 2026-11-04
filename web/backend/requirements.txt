@@ -1,0 +1,52 @@
+# -*- coding: utf-8 -*-
+# (Dòng trên để pip cũ đọc đúng chú thích tiếng Việt thay vì dùng mã hoá của hệ điều hành.)
+# Toàn bộ thư viện backend web (API + suy luận), khoá đúng phiên bản đang phục vụ run
+# baseline_v6; đã cài thử sạch vào web/.venv mới (Python 3.11.16, xem backend/README.md) và
+# dùng được với .venv gốc (Python 3.11.2). Chữ ký tiền xử lý băm cả phiên bản
+# beautifulsoup4, tldextract và magika, nên đổi ba bản này thì run bị từ chối. Bản
+# preprocess.py đóng băng của v6 không dùng NLTK (đã bỏ nltk và textblob).
+-r requirements-api.txt
+
+numpy==2.4.6
+scipy==1.17.1
+gensim==4.4.0
+scikit-learn==1.9.1
+xgboost==3.2.0
+beautifulsoup4==4.15.0
+pandas==3.0.6
+# Trích feature của v6: Public Suffix List đóng gói theo bản tldextract, kiểu nội dung file
+# đính kèm bằng Magika (model đi kèm gói), phân tích macro tĩnh bằng olevba.
+tldextract==5.4.0
+magika==1.0.3
+oletools==0.60.2
+
+# Phụ thuộc gián tiếp của các gói trên, cùng phiên bản trong .venv gốc.
+joblib==1.6.0
+cloudpickle==3.1.2
+narwhals==2.26.0
+threadpoolctl==3.7.0
+smart_open==8.0.1
+wrapt==2.4.1
+soupsieve==2.9.2
+python-dateutil==2.9.0.post0
+six==1.17.0
+tzdata==2026.4
+filelock==3.32.3
+requests==2.34.2
+requests-file==3.0.1
+charset-normalizer==3.5.1
+urllib3==2.8.0
+onnxruntime==1.31.1
+flatbuffers==25.12.19
+packaging==26.3
+protobuf==7.36.2
+olefile==0.47
+colorclass==2.2.2
+easygui==0.98.3
+pcodedmp==1.2.6
+win-unicode-console==0.5; sys_platform == "win32"
+msoffcrypto-tool==6.1.0
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.12
+pyparsing==3.3.3

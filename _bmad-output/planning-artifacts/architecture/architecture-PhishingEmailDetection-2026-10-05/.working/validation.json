@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-05",
+  "scope": "architecture documents only",
+  "spine": "ARCHITECTURE-SPINE.md",
+  "status": "final",
+  "decision_count": 13,
+  "deterministic_lint": {"ok": true, "total_findings": 0},
+  "source_paths_checked": 12,
+  "spine_markdown_links_checked": 3,
+  "missing_paths": [],
+  "independent_reviewers": {
+    "rubric": "PASS after fixes",
+    "current_technology": "PASS after fixes",
+    "interoperability_seams": "PASS after fixes including final deadline arithmetic"
+  },
+  "reconciled_inputs": ["SPEC package", "PRD and addendum", "draft UX pair", "updated application plan and supplied Graph", "brownfield code constraints"],
+  "source_handoffs": ["adopt spine into SPEC companion", "align draft UX policy wording", "retain historical versus current plan evidence boundaries"],
+  "implementation_gates_pending": ["E0 eligible target and verified model release", "initial policy and clock-skew qualification", "whole-container free-host measurements and access protection"],
+  "not_performed": ["application implementation or build", "project test suite", "model hash/deserialization qualification", "training", "evaluation", "deployment"]
+}

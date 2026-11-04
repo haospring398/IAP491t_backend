@@ -1,0 +1,8 @@
+[
+  {"lens":"structure","location":"prd.md: MVP scope and dependencies","original_text":"Scope/non-goals after detailed requirements; E0 blocker near the end","revised_text":"MOVE scope after vision and E0 blocker into that scope","changes":"Accepted and applied; zero word reduction"},
+  {"lens":"structure","location":"prd.md: Vision and target users","original_text":"Separate source-provenance qualifiers","revised_text":"CONDENSE into one sentence; retain roles, job and session","changes":"Accepted and applied; section 164 to 149 words"},
+  {"lens":"structure","location":"addendum.md: Introduction and delivery dependencies","original_text":"E0 remains unverified after gate table","revised_text":"MOVE into introduction","changes":"Accepted and applied; zero word reduction"},
+  {"lens":"prose","location":"prd.md: FR-2, FR-6, NFR-3, SM-C1","original_text":"Settings remain Q-number","revised_text":"Settings remain open under Q-number","changes":"Accepted and applied; IDs and meaning preserved"},
+  {"lens":"prose","location":"addendum.md: Technical baseline and boundaries","original_text":"one worker/active inference","revised_text":"one worker and one active inference, with bounded work","changes":"Accepted and applied; independently applicable limits clarified"},
+  {"lens":"prose","location":"addendum.md: Technical baseline and boundaries","original_text":"scaling fits training only","revised_text":"the scaler is fitted on training data only","changes":"Accepted and applied; component and data clarified"}
+]

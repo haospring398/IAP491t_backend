@@ -1,0 +1,16 @@
+From: alex@example.test
+Subject: Attached meeting notes
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=sample-mixed
+
+--sample-mixed
+Content-Type: text/plain; charset=utf-8
+
+Please review the attached meeting notes before tomorrow.
+--sample-mixed
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="notes.txt"
+Content-Transfer-Encoding: base64
+
+U2FtcGxlIGF0dGFjaG1lbnQu
+--sample-mixed--
