@@ -7,12 +7,11 @@ from unittest.mock import patch
 from pathlib import Path
 
 import pandas as pd
-from nltk.stem import WordNetLemmatizer
 
 from pipeline_cache import PreprocessingCache, preprocessing_signature
 from preprocess import (compute_dedup_key, _parse_email, _get_email_body, _strip_html,
                         _normalize, extract_engineered_features, cleanText, remove_stopwords,
-                        prepare_semantic_text)
+                        group_signature)
 
 
 def benchmark(output, records=400):
@@ -42,23 +41,19 @@ def benchmark(output, records=400):
             box.close()
     data = pd.DataFrame(messages)
     _, settings = preprocessing_signature()
-    lemmatizer = WordNetLemmatizer()
     expected = []
     _strip_html.cache_clear()
     start = time.perf_counter()
     # The previous pipeline had no HTML conversion cache and reparsed raw MIME
-    # independently for identity, grouping, engineered features, text and BERT.
+    # independently for identity, grouping, engineered features and text.
     with patch('preprocess._strip_html', _strip_html.__wrapped__):
         for raw in data.Text:
             key = compute_dedup_key(raw)
             plain, markup = _get_email_body(_parse_email(raw))
             body = _normalize('\n'.join(dict.fromkeys(p for p in (plain, _strip_html.__wrapped__(markup)) if p.strip())))
             features = extract_engineered_features(raw)
-            semantic = prepare_semantic_text(raw)
             text = remove_stopwords(cleanText(raw))
-            if settings['lemmatization']:
-                text = ' '.join(lemmatizer.lemmatize(w, pos='v') for w in text.split())
-            expected.append((key, body, features, semantic, text))
+            expected.append((key, group_signature(body, key), features, text))
     legacy_seconds = time.perf_counter() - start
     timings = {}
     for phase in ('cold', 'warm'):
@@ -68,8 +63,8 @@ def benchmark(output, records=400):
             actual = cache.prepare(data, 'identity', output)
             actual = cache.prepare(actual, 'features', output)
         timings[phase] = time.perf_counter() - start
-        observed = list(zip(actual._dedup_key, actual._group_body, actual._features,
-                            actual._semantic_text, actual._clean_text))
+        observed = list(zip(actual._dedup_key, zip(actual._group_key, actual._simhash), actual._features,
+                            actual._clean_text))
         if observed != expected:
             raise RuntimeError('Benchmark found different preprocessing outputs')
     report = {'rows': len(data), 'workers': 1, 'repeated_traversal_seconds': legacy_seconds,

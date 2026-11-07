@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 import sklearn
 from gensim.models.doc2vec import Doc2Vec, TaggedDocument
-from nltk.stem import WordNetLemmatizer
 from sklearn.base import clone
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.preprocessing import StandardScaler
@@ -22,18 +21,20 @@ from sklearn.ensemble import (RandomForestClassifier, AdaBoostClassifier, Gradie
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.naive_bayes import GaussianNB
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neural_network import MLPClassifier
 from xgboost import XGBClassifier
 
 from load_data import (load_data_phishing, load_data_enron, load_data_spamassassin,
-                       load_data_epvme, load_data_phishing_pot, load_data_trec07p, record_dataset_root_files,
+                       load_data_epvme, load_data_phishing_pot, load_data_malspam, load_data_trec07p,
+                       record_dataset_root_files,
                        reset_source_stats, SOURCE_COUNTS, SOURCE_ERRORS, SOURCE_ROW_ISSUES)
-from preprocess import (FEATURE_NAMES, HTML_SECURITY_FEATURE_NAMES, cleanText, remove_stopwords, tokenize_text,
+from preprocess import (cleanText, remove_stopwords, tokenize_text,
                         extract_engineered_features, deduplicate_emails,
                         group_email_variants, split_train_validation_test,
-                        prepare_semantic_text, BertEmailClassifier, infer_document_vector)
+                        infer_document_vector,
+                        BASELINE_EXTRA_FEATURES, BASELINE_FEATURE_NAMES, baseline_feature_vector,
+                        ATTACHMENT_RULES)
 from evaluate import positive_scores, select_threshold, validation_rank, file_digest
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -50,37 +51,33 @@ POSITIVE_LABELS = {'phishing': 'phishing', 'broad': 'phishing/spam/unspecified-p
 INCLUDE_SYNTHETIC_MALICIOUS = True
 MIN_VALIDATION_PRECISION = 0.90  # Target on validation, not a production guarantee.
 BALANCED_MODE = 0  # 1: downsample TRAIN only; validation/test keep their distribution.
-TRAIN_ALL_MODELS = True  # Train all 10 classifiers; tune XGBoost, MLP and Random Forest.
+TRAIN_ALL_MODELS = True  # Train all 9 classifiers; tune XGBoost, MLP and Random Forest.
 RUN_ABLATION = True
-# Bộ feature kỹ thuật cho thí nghiệm thiên lệch is_html (chỉ chọn cột từ cache, không đổi
-# chữ ký tiền xử lý). html_to_text_ratio bằng 0 đúng khi email không có HTML, nên bỏ cùng
-# is_html; nếu không model vẫn suy ra được is_html. 'html_content' thêm các số đo nội dung
-# HTML (script, iframe, ô mật khẩu, event handler...) đã có sẵn trong cache.
-HTML_PRESENCE_FEATURES = ('is_html', 'html_to_text_ratio')
-# 'no_era_proxies' bỏ thêm feature nghi phản ánh thời đại/nguồn của email chứ không phải
+# 'no_era_proxies' bỏ các feature nghi phản ánh thời đại/nguồn của email chứ không phải
 # phishing: email hợp lệ trong Dataset/ đều trước 2008 (ít HTTPS, hiếm display:none).
 # num_urls = http + https + URL không scheme, nên phải bỏ cả hai cột đếm theo scheme.
+# Chỉ chọn cột lúc vectorize: export của --features-only vẫn đủ BASELINE_FEATURE_NAMES.
+# (Hai bộ cũ no_html_presence/html_content nay là mặc định của v6 nên đã bỏ.)
 ERA_PROXY_FEATURES = ('num_https_urls', 'num_http_urls', 'has_hidden_elements')
-FEATURE_SETS = ('full', 'no_html_presence', 'html_content', 'no_era_proxies')
+FEATURE_SETS = ('full', 'no_era_proxies')
 DOC2VEC_DIM = 100
 DOC2VEC_EPOCHS = 40
 INFERENCE_EPOCHS = 30
-TRAIN_BERT = True
-BERT_MODEL_NAME = 'google-bert/bert-base-uncased'
-BERT_EPOCHS = 3
-BERT_BATCH_SIZE = 2
-BERT_MAX_LENGTH = 256
-BERT_STRIDE = 64
-BERT_GRAD_ACCUMULATION = 8
-BERT_LEARNING_RATE = 2e-5
+# Default pipeline: Doc2Vec + engineered features, 9 classifiers, one selected on
+# validation. The specialist mode (--mode specialists) has four tabular branches.
 
 
 def save_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding='utf-8')
 
 
-def load_training_emails(output, dataset_dir=None):
+def load_training_emails(output, dataset_dir=None, compress=False, store=None):
+    """compress=True replaces each source's raw emails as soon as it is read: with a
+    pipeline_cache.EmailStore they move to disk (a ~50-byte handle stays in memory), without one
+    they are zlib-compressed in memory. ~4 GB of raw email did not fit the 7 GB sandbox."""
     import load_data
+    from pipeline_cache import compress_texts, memory_status
+    shrink = (lambda frame: compress_texts(frame, store)) if compress else (lambda frame: frame)
     from dataset_audit import DatasetAudit, record_id
     output = Path(output)
     reset_source_stats()
@@ -89,12 +86,13 @@ def load_training_emails(output, dataset_dir=None):
     load_data.ACTIVE_AUDIT = audit
     try:
         # trec07p trước: khi có bản thô thì TREC_07.csv trong phishing/ bị loại.
-        phishing, legitimate = load_data_trec07p(pd.DataFrame(), pd.DataFrame(), dataset / 'trec07p')
-        phishing = load_data_phishing(phishing, dataset / 'phishing')
-        phishing, legitimate = load_data_spamassassin(phishing, legitimate, dataset / 'spamassassin')
-        legitimate = load_data_enron(legitimate, 0, enron_dir=dataset / 'enron')
-        phishing = load_data_epvme(phishing, dataset / 'EPVME_extracted')
-        phishing = load_data_phishing_pot(phishing, dataset / 'phishing_pot')
+        phishing, legitimate = map(shrink, load_data_trec07p(pd.DataFrame(), pd.DataFrame(), dataset / 'trec07p'))
+        phishing = shrink(load_data_phishing(phishing, dataset / 'phishing'))
+        phishing, legitimate = map(shrink, load_data_spamassassin(phishing, legitimate, dataset / 'spamassassin'))
+        legitimate = shrink(load_data_enron(legitimate, 0, enron_dir=dataset / 'enron'))
+        phishing = shrink(load_data_epvme(phishing, dataset / 'EPVME_extracted'))
+        phishing = shrink(load_data_phishing_pot(phishing, dataset / 'phishing_pot'))
+        phishing = shrink(load_data_malspam(phishing, dataset / 'malspam'))
         record_dataset_root_files(dataset)
     finally:
         load_data.ACTIVE_AUDIT = None
@@ -107,7 +105,17 @@ def load_training_emails(output, dataset_dir=None):
     data['RecordId'] = data.Location.map(record_id)
     if len(data) != SOURCE_COUNTS['emails_loaded'] or data.RecordId.duplicated().any():
         raise RuntimeError('Loaded row accounting mismatch or duplicate source record IDs')
+    if memory_status():
+        print(f'Loaded {len(data)} emails; {memory_status()}', flush=True)
     return data
+
+
+def raw_email_store(output):
+    """Scratch EmailStore on IAP491_SCRATCH_DIR (the sandbox's Linux volume) or the run folder."""
+    import os, uuid
+    from pipeline_cache import EmailStore
+    folder = Path(os.environ.get('IAP491_SCRATCH_DIR') or output)
+    return EmailStore(folder / f'raw-emails-{uuid.uuid4().hex}.sqlite')
 
 
 def select_label_scope(data, target_mode, output, include_synthetic=INCLUDE_SYNTHETIC_MALICIOUS):
@@ -136,7 +144,8 @@ def select_label_scope(data, target_mode, output, include_synthetic=INCLUDE_SYNT
         outside_ids = set(data.loc[outside, 'RecordId'])
         data['Class'] = data.LabelKind.map(STAGE2_CLASSES)
     data, audit = deduplicate_emails(data, report_path=output / 'label_conflicts.csv', return_audit=True)
-    positive_kinds = {'phishing', 'malicious_synthetic'} if include_synthetic else {'phishing'}
+    # Malspam (malicious email delivering malware) is a positive in phishing mode.
+    positive_kinds = {'phishing', 'malspam'} | ({'malicious_synthetic'} if include_synthetic else set())
     keep = ((data.Class == 0) | data.LabelKind.isin(positive_kinds) if target_mode == 'phishing'
             else np.ones(len(data), dtype=bool))
     if target_mode != 'phishing_vs_spam':
@@ -169,46 +178,39 @@ def infer_doc_vectors(model, texts):
     return np.asarray(vectors, dtype=np.float32)
 
 
-def feature_columns(feature_set='full'):
-    """Tên feature kỹ thuật theo đúng thứ tự cột: phần lấy từ FEATURE_NAMES, rồi phần thêm."""
-    if feature_set not in FEATURE_SETS:
-        raise ValueError(f'Unknown feature set: {feature_set}')
-    if feature_set == 'full':
-        return list(FEATURE_NAMES), []
-    dropped = HTML_PRESENCE_FEATURES + (ERA_PROXY_FEATURES if feature_set == 'no_era_proxies' else ())
-    kept = [name for name in FEATURE_NAMES if name not in dropped]
-    return kept, list(HTML_SECURITY_FEATURE_NAMES) if feature_set == 'html_content' else []
-
-
 def prepare_data(data, output, target_mode=TARGET_MODE, seed=SEED, epochs=DOC2VEC_EPOCHS,
-                 balanced_mode=BALANCED_MODE, semantic_data=None, cache_dir=None, workers=None,
-                 feature_set='full'):
-    kept, extra = feature_columns(feature_set)
+                 balanced_mode=BALANCED_MODE, cache_dir=None, workers=None, feature_set='full'):
+    frames, preprocessing = prepare_features(data, output, target_mode, seed, balanced_mode, cache_dir, workers)
+    return vectorize(frames, preprocessing, epochs=epochs, seed=seed, feature_set=feature_set)
+
+
+def prepare_features(data, output, target_mode=TARGET_MODE, seed=SEED, balanced_mode=BALANCED_MODE,
+                     cache_dir=None, workers=None):
+    """Raw email -> train/validation/test frames of metadata, clean text and baseline vectors.
+
+    This is the only stage that parses (possibly malicious) email; vectorize() and the
+    classifiers work on its output alone, so they can run outside the sandbox.
+    """
     from pipeline_cache import PreprocessingCache
     with PreprocessingCache(cache_dir or BASE_DIR / '.pipeline_cache', workers=workers) as cache:
         data = cache.prepare(data, 'identity', output)
         data = select_label_scope(data, target_mode, output)
-        if semantic_data is None:
-            # Văn bản cho BERT không cần khi không train BERT; bỏ sớm để giảm RAM (~1 GB).
-            data = data.drop(columns='_semantic_text')
-        data = cache.prepare(data, 'features', output)
+        # Thu gọn từng email ngay khi tính xong: chỉ giữ text sạch và vector baseline float32
+        # (BASELINE_FEATURE_NAMES). Giữ đủ các dict feature của ~400k email vượt RAM sandbox.
+        def compact(result):
+            return {'_clean_text': result['_clean_text'],
+                    '_features': np.asarray(baseline_feature_vector(result), dtype=np.float32)}
+        data = cache.prepare(data, 'features', output, transform=compact)
         # Email thô không còn cần sau khi trích feature/văn bản; giải phóng trước bước nhóm.
+        # Bước nhóm dùng hash + SimHash của stage identity, không parse lại Text.
         data['Text'] = data['_clean_text']
-        if feature_set != 'full':
-            positions = [FEATURE_NAMES.index(name) for name in kept]
-            data['_features'] = [[values[i] for i in positions] + [float(html[name]) for name in extra]
-                                 for values, html in zip(data['_features'], data['_html_features'])]
-        # Dict feature chỉ dành cho nhánh specialist hoặc làm bằng chứng; baseline không dùng.
-        data = data.drop(columns=[c for c in ('_html_features', '_message_security', '_text_obfuscation',
-                                              '_link_features', '_attachment_payload', '_content_indicators')
-                                  if c in data])
         # Ghi chữ ký tiền xử lý để web demo kiểm tra đúng code/stopwords/lemmatization.
         preprocessing = {'signature': cache.signature,
                          'lemmatization': cache.settings['lemmatization'],
                          'stopwords': cache.settings['stopwords']}
     print('Grouping near duplicates...', flush=True)
     data['_group'] = group_email_variants(data)
-    data = data.drop(columns='_group_body')
+    data = data.drop(columns=['_group_key', '_simhash'])
     train, validation, test = split_train_validation_test(data, seed=seed)
     # Persist provenance without email bodies, aligned with each output array.
     columns = ['RecordId', 'Source', 'Location', 'LabelKind', 'LabelBasis', 'OriginalLabel', 'Class', '_dedup_key', '_group']
@@ -222,21 +224,29 @@ def prepare_data(data, output, target_mode=TARGET_MODE, seed=SEED, epochs=DOC2VE
                                     for _, part in train.groupby('Class')]).sort_index()
     elif balanced_mode != 0:
         raise ValueError('BALANCED_MODE must be 0 or 1')
-    lemmatizer = WordNetLemmatizer()
-    try:
-        lemmatizer.lemmatize('running', pos='v')
-        lemmatize = True
-    except LookupError:
-        lemmatize = False
     for name, frame in frames.items():
         print(f'{name}: {frame.Class.value_counts().to_dict()}; extracting complete email features', flush=True)
         frame = frame.copy()
         frame[columns].to_csv(output / f'{name}_metadata.csv', index=False)
-        if semantic_data is not None:
-            semantic_data[name] = frame['_semantic_text'].to_list()
         frame['Features'] = frame['_features'].map(lambda value: np.asarray(value, dtype=np.float32))
         frame['Text'] = frame['_clean_text']
-        frames[name] = frame
+        frames[name] = frame[[*columns, 'Text', 'Features']]
+    return frames, preprocessing
+
+
+def feature_columns(feature_set='full'):
+    """Tên và vị trí (trong BASELINE_FEATURE_NAMES) của các cột feature kỹ thuật được giữ."""
+    if feature_set not in FEATURE_SETS:
+        raise ValueError(f'Unknown feature set: {feature_set}')
+    dropped = ERA_PROXY_FEATURES if feature_set == 'no_era_proxies' else ()
+    kept = [name for name in BASELINE_FEATURE_NAMES if name not in dropped]
+    return kept, [BASELINE_FEATURE_NAMES.index(name) for name in kept]
+
+
+def vectorize(frames, preprocessing, epochs=DOC2VEC_EPOCHS, seed=SEED, feature_set='full'):
+    """Doc2Vec (fit on train only) + scaled baseline features -> (X, y) per split."""
+    kept, positions = feature_columns(feature_set)
+    lemmatize = preprocessing['lemmatization']  # False since nltk was removed
     train = frames['train']
     tagged = [TaggedDocument(words=tokenize_text(text) or ['emptyemailtoken'], tags=[int(i)])
               for i, text in enumerate(train.Text)]
@@ -250,22 +260,88 @@ def prepare_data(data, output, target_mode=TARGET_MODE, seed=SEED, epochs=DOC2VE
                 start_alpha=0.025, end_alpha=0.0005)
     assert len(model.dv) == len(tagged)
     scaler = StandardScaler()
-    numerical = np.stack(train.Features.to_list())
+    numerical = np.stack(train.Features.to_list())[:, positions]
     scaler.fit(numerical)  # TRAIN ONLY
     arrays = {}
     for name, frame in frames.items():
         doc = infer_doc_vectors(model, frame.Text.to_list())
-        features = scaler.transform(np.stack(frame.Features.to_list())).astype(np.float32)
+        features = scaler.transform(np.stack(frame.Features.to_list())[:, positions]).astype(np.float32)
         X = np.hstack([doc, features])
         y = frame.Class.to_numpy(dtype=np.int64)
         if not np.isfinite(X).all():
             raise ValueError(f'Non-finite features in {name}')
         arrays[name] = (X, y)
     return arrays, model, scaler, {'lemmatization': lemmatize, 'doc2vec_dim': DOC2VEC_DIM,
-        'epochs': epochs, 'inference_epochs': INFERENCE_EPOCHS, 'feature_names': kept + extra,
-        'feature_set': feature_set, 'preprocessing': preprocessing,
+        'epochs': epochs, 'inference_epochs': INFERENCE_EPOCHS, 'feature_names': kept,
+        'feature_set': feature_set, 'attachment_rules': dict(ATTACHMENT_RULES),
+        'preprocessing': preprocessing,
         'split_counts': {name: {str(k): int(v) for k, v in frame.Class.value_counts().items()}
                          for name, frame in frames.items()}}
+
+
+FEATURE_EXPORT = 'features_manifest.json'
+# Files the host copies from a feature folder into each model run (evaluate.py and audits use them).
+FEATURE_PROVENANCE = ('split_manifest.csv', 'train_metadata.csv', 'validation_metadata.csv', 'test_metadata.csv',
+                      'load_summary.json', 'selection_summary.json', 'source_labels.csv', 'label_conflicts.csv',
+                      'label_scope_excluded.csv', 'training_dispositions.csv', 'csv_rows_quarantined.csv',
+                      'preprocessing_identity.json', 'preprocessing_features.json')
+
+
+def export_features(frames, preprocessing, output, target_mode, seed=SEED):
+    """Write prepare_features() output in formats that cannot run code when read: .npy without
+    pickle, JSON-lines text, CSV metadata. The sandbox writes them; the host trains from them."""
+    import gzip
+    output = Path(output)
+    files = {}
+    for name, frame in frames.items():
+        np.save(output / f'features_{name}.npy', np.stack(frame.Features.to_list()).astype(np.float32),
+                allow_pickle=False)
+        np.save(output / f'labels_{name}.npy', frame.Class.to_numpy(dtype=np.int64), allow_pickle=False)
+        with gzip.open(output / f'text_{name}.jsonl.gz', 'wt', encoding='utf-8') as handle:
+            for text in frame.Text:
+                handle.write(json.dumps(text, ensure_ascii=False) + '\n')
+        files.update({f'features_{name}.npy': None, f'labels_{name}.npy': None, f'text_{name}.jsonl.gz': None,
+                      f'{name}_metadata.csv': None})
+    manifest = {'kind': 'baseline_features', 'schema': 1, 'target_mode': target_mode, 'seed': seed,
+                'preprocessing': preprocessing, 'feature_names': list(BASELINE_FEATURE_NAMES),
+                'attachment_rules': dict(ATTACHMENT_RULES),
+                'split_counts': {name: {str(k): int(v) for k, v in frame.Class.value_counts().items()}
+                                 for name, frame in frames.items()},
+                'files': {name: file_digest(output / name) for name in files}}
+    save_json(output / FEATURE_EXPORT, manifest)
+    print(f'Features exported to {output}; train with: python train.py --from-features {output} --output <run>',
+          flush=True)
+    return manifest
+
+
+def load_exported_features(folder):
+    """Read export_features() output after checking every file's SHA-256. Nothing is unpickled."""
+    import gzip
+    folder = Path(folder)
+    manifest = json.loads((folder / FEATURE_EXPORT).read_text(encoding='utf-8'))
+    if manifest.get('kind') != 'baseline_features' or manifest.get('schema') != 1:
+        raise ValueError(f'{folder} is not a baseline feature export')
+    for name, expected in manifest['files'].items():
+        if file_digest(folder / name) != expected:
+            raise RuntimeError(f'Feature export changed after it was written: {name}')
+    if manifest['feature_names'] != list(BASELINE_FEATURE_NAMES):
+        raise ValueError('Exported feature names differ from this code; re-extract the features')
+    frames = {}
+    for name in ('train', 'validation', 'test'):
+        frame = pd.read_csv(folder / f'{name}_metadata.csv')
+        features = np.load(folder / f'features_{name}.npy', allow_pickle=False)
+        labels = np.load(folder / f'labels_{name}.npy', allow_pickle=False)
+        with gzip.open(folder / f'text_{name}.jsonl.gz', 'rt', encoding='utf-8') as handle:
+            texts = [json.loads(line) for line in handle]
+        if not (len(frame) == len(features) == len(labels) == len(texts)) or not np.array_equal(
+                frame.Class.to_numpy(), labels):
+            raise ValueError(f'Feature export split {name} is not aligned')
+        if features.shape[1] != len(BASELINE_FEATURE_NAMES) or not np.isfinite(features).all():
+            raise ValueError(f'Feature export split {name} has invalid vectors')
+        frame['Text'] = texts
+        frame['Features'] = list(features)
+        frames[name] = frame
+    return frames, manifest
 
 
 def build_candidates(y_train, seed=SEED, all_models=TRAIN_ALL_MODELS):
@@ -289,7 +365,6 @@ def build_candidates(y_train, seed=SEED, all_models=TRAIN_ALL_MODELS):
             'Logistic Regression': [LogisticRegression(max_iter=2000, class_weight='balanced', random_state=seed)],
             'SVM': [SVC(probability=True, class_weight='balanced', random_state=seed)],
             'KNN': [KNeighborsClassifier(n_neighbors=min(5, len(y_train)))],
-            'Naive Bayes': [GaussianNB()],
             'Decision Tree': [DecisionTreeClassifier(min_samples_leaf=5, class_weight='balanced', random_state=seed)],
             'AdaBoost': [AdaBoostClassifier(random_state=seed)],
             'Gradient Boosting': [GradientBoostingClassifier(random_state=seed)]})
@@ -346,175 +421,50 @@ def feature_ablation(winners, arrays, precision_target):
     return rows
 
 
-
-def train_bert_classifier(bert, texts, labels, validation_texts, validation_labels,
-                          checkpoint, precision_target, epochs=BERT_EPOCHS):
-    """Train on train windows only; choose epoch/threshold on whole validation emails."""
-    import math
-    import torch
-    from contextlib import nullcontext
-    from transformers import get_linear_schedule_with_warmup
-    if epochs < 1:
-        raise ValueError("BERT epochs must be positive")
-    if len(texts) != len(labels) or not len(texts) or set(np.unique(labels)) != {0, 1}:
-        raise ValueError("BERT training needs aligned email text and labels from both classes")
-    if len(validation_texts) != len(validation_labels):
-        raise ValueError("BERT validation text and labels are not aligned")
-    torch.manual_seed(SEED)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(SEED)
-
-    class WindowDataset(torch.utils.data.Dataset):
-        def __init__(self):
-            self.tokens, owners, weights = [], [], []
-            for owner, text in enumerate(texts):
-                windows = bert.encode_windows(text)
-                for window in windows:
-                    self.tokens.append(np.asarray(window["input_ids"], dtype=np.int32))
-                    owners.append(owner)
-                    weights.append(1.0 / len(windows))
-                if (owner + 1) % 5000 == 0:
-                    print(f'BERT tokenized {owner + 1}/{len(texts)} train emails', flush=True)
-            self.owners = np.asarray(owners, dtype=np.int64)
-            # Equal total contribution per email, even when it has many windows.
-            self.weights = np.asarray(weights, dtype=np.float32) * len(owners) / len(texts)
-        def __len__(self):
-            return len(self.tokens)
-        def __getitem__(self, index):
-            ids = self.tokens[index].tolist()
-            return ({"input_ids": ids, "attention_mask": [1] * len(ids),
-                     "token_type_ids": [0] * len(ids)},
-                    int(labels[self.owners[index]]), float(self.weights[index]))
-
-    def collate(rows):
-        inputs, targets, weights = zip(*rows)
-        padded = bert.tokenizer.pad(list(inputs), padding=True, return_tensors="pt")
-        return padded, torch.tensor(targets, dtype=torch.long), torch.tensor(weights, dtype=torch.float32)
-
-    dataset = WindowDataset()
-    generator = torch.Generator().manual_seed(SEED)
-    loader = torch.utils.data.DataLoader(dataset, batch_size=bert.batch_size,
-        shuffle=True, collate_fn=collate, num_workers=0, generator=generator)
-    counts = np.bincount(np.asarray(labels, dtype=int), minlength=2)
-    if not len(texts) or (counts == 0).any():
-        raise ValueError("BERT training requires both labelled classes")
-    class_weights = torch.tensor(len(labels) / (2.0 * counts), dtype=torch.float32, device=bert.device)
-    optimizer = torch.optim.AdamW(bert.model.parameters(), lr=BERT_LEARNING_RATE, weight_decay=0.01)
-    updates = math.ceil(len(loader) / BERT_GRAD_ACCUMULATION) * epochs
-    scheduler = get_linear_schedule_with_warmup(optimizer, int(updates * 0.1), updates)
-    use_amp = bert.device.type == "cuda"
-    amp_scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
-    bert.model.gradient_checkpointing_enable()
-    best, best_scores, trials = None, None, []
-    print(f'BERT: {len(texts)} emails, {len(dataset)} train windows, device={bert.device}', flush=True)
-    for epoch in range(epochs):
-        bert.model.train()
-        optimizer.zero_grad(set_to_none=True)
-        running_loss = 0.0
-        for step, (inputs, targets, weights) in enumerate(loader):
-            inputs = {key: value.to(bert.device) for key, value in inputs.items()}
-            targets, weights = targets.to(bert.device), weights.to(bert.device)
-            group_size = min(BERT_GRAD_ACCUMULATION,
-                             len(loader) - (step // BERT_GRAD_ACCUMULATION) * BERT_GRAD_ACCUMULATION)
-            context = torch.autocast(device_type="cuda", dtype=torch.float16) if use_amp else nullcontext()
-            with context:
-                logits = bert.model(**inputs).logits
-                losses = torch.nn.functional.cross_entropy(
-                    logits.float(), targets, weight=class_weights, reduction="none")
-                loss = (losses * weights).mean()
-            if not torch.isfinite(loss):
-                raise RuntimeError("Non-finite BERT loss; training stopped")
-            running_loss += float(loss.detach())
-            amp_scaler.scale(loss / group_size).backward()
-            if (step + 1) % BERT_GRAD_ACCUMULATION == 0 or step + 1 == len(loader):
-                amp_scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(bert.model.parameters(), 1.0)
-                previous_scale = amp_scaler.get_scale()
-                amp_scaler.step(optimizer)
-                amp_scaler.update()
-                if amp_scaler.get_scale() >= previous_scale:
-                    scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
-            if (step + 1) % 100 == 0:
-                print(f'BERT epoch {epoch + 1}/{epochs}, batch {step + 1}/{len(loader)}, '
-                      f'loss={running_loss / (step + 1):.4f}', flush=True)
-        scores = positive_scores(bert, validation_texts)
-        decision = select_threshold(validation_labels, scores, precision_target)
-        decision.update(average_precision=float(average_precision_score(validation_labels, scores)),
-                        epoch=epoch + 1, candidate=epoch, convergence_warning=False)
-        trials.append({"Model": "BERT", **decision})
-        print(f'BERT epoch {epoch + 1}: validation precision={decision["precision"]:.4f}, '
-              f'recall={decision["recall"]:.4f}', flush=True)
-        if best is None or validation_rank(decision) > validation_rank(best):
-            best, best_scores = decision, scores.copy()
-            bert.decision_threshold_ = decision["threshold"]
-            bert.save_pretrained(checkpoint)
-    device = str(bert.device)
-    bert.model.to("cpu")
-    del optimizer, scheduler, amp_scaler, dataset, loader
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    best_model = BertEmailClassifier.from_pretrained(checkpoint, device=device, batch_size=bert.batch_size)
-    return best_model, best, trials, best_scores
-
-
 def training(data=None, output_dir=BASE_DIR, candidates=None, epochs=DOC2VEC_EPOCHS,
              target_mode=TARGET_MODE, precision_target=MIN_VALIDATION_PRECISION,
-             run_ablation=RUN_ABLATION, train_bert=TRAIN_BERT,
-             bert_model_name=BERT_MODEL_NAME, bert_epochs=BERT_EPOCHS, cache_dir=None, workers=None,
+             run_ablation=RUN_ABLATION, cache_dir=None, workers=None, features_only=False, from_features=None,
              feature_set='full'):
-    # Fail before overwriting a completed run or starting hours of classic training.
-    bert = None
-    if train_bert:
-        try:
-            import torch
-            import transformers
-        except ImportError as exc:
-            raise RuntimeError('BERT needs torch, transformers and safetensors. '
-                               'Install requirements.txt before training.') from exc
-        torch.manual_seed(SEED)
-        bert = BertEmailClassifier.from_pretrained(
-            bert_model_name, batch_size=BERT_BATCH_SIZE,
-            max_length=BERT_MAX_LENGTH, stride=BERT_STRIDE)
-        bert.model.config.email_positive_label = (
-            POSITIVE_LABELS[target_mode])
-        print(f'BERT initialized on {bert.device}; pretrained weights will be fine-tuned.', flush=True)
+    """features_only: parse email and export features (the sandbox stage), no training.
+    from_features: train from such an export, never touching raw email (the host stage)."""
+    feature_columns(feature_set)  # Báo sai tên bộ feature trước khi đọc dữ liệu hàng giờ.
     output = Path(output_dir); output.mkdir(parents=True, exist_ok=True)
+    if from_features is not None:
+        frames, exported = load_exported_features(from_features)
+        if exported['target_mode'] != target_mode:
+            raise ValueError(f"Features were extracted for target mode {exported['target_mode']}, not {target_mode}")
+        import shutil
+        for name in FEATURE_PROVENANCE:
+            if (Path(from_features) / name).exists():
+                shutil.copy2(Path(from_features) / name, output / name)
+        preprocessing = exported['preprocessing']
+    else:
+        store = raw_email_store(output)
+        try:
+            if data is None:
+                data = load_training_emails(output, compress=True, store=store)
+            # Không giữ tham chiếu tới DataFrame email thô ở đây: prepare_features chỉ giữ lại một phần
+            # số dòng, còn bản đầy đủ (~5 GB với toàn bộ Dataset) sẽ nằm trong RAM suốt quá trình.
+            source = [data]
+            del data
+            frames, preprocessing = prepare_features(source.pop(), output, target_mode,
+                                                     cache_dir=cache_dir, workers=workers)
+        finally:
+            store.close()  # raw emails are no longer needed once features are extracted
+        if features_only:
+            return export_features(frames, preprocessing, output, target_mode)
     model_dir = output / 'dumped_models' / 'classification'; model_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = model_dir / 'run_manifest.json'
     save_json(manifest_path, {'status': 'incomplete'})  # Interrupted runs cannot be evaluated as complete.
-    if data is None:
-        data = load_training_emails(output)
-    semantic_data = {} if train_bert else None
-    # Không giữ tham chiếu tới DataFrame email thô ở đây: prepare_data chỉ giữ lại một phần
-    # số dòng, còn bản đầy đủ (~5 GB với toàn bộ Dataset) sẽ nằm trong RAM suốt quá trình.
-    source = [data]
-    del data
-    arrays, doc2vec, scaler, settings = prepare_data(
-        source.pop(), output, target_mode, epochs=epochs, semantic_data=semantic_data,
-        cache_dir=cache_dir, workers=workers, feature_set=feature_set)
+    arrays, doc2vec, scaler, settings = vectorize(frames, preprocessing, epochs=epochs, feature_set=feature_set)
+    del frames
+    if from_features is not None:
+        settings['features_from'] = str(from_features)
     X_train, y_train = arrays['train']; X_val, y_val = arrays['validation']
     if candidates is None:
         candidates = build_candidates(y_train)
     winners, trials = tune_classifiers(X_train, y_train, X_val, y_val, candidates, precision_target)
     decisions = {name: decision for name, (_, decision) in winners.items()}
-    bert_validation_scores = None
-    if train_bert:
-        bert, decision, bert_trials, bert_validation_scores = train_bert_classifier(
-            bert, semantic_data['train'], y_train, semantic_data['validation'], y_val,
-            model_dir / 'bert', precision_target, epochs=bert_epochs)
-        decisions['BERT'] = decision
-        trials.extend(bert_trials)
-        settings['bert'] = {
-            'checkpoint': bert_model_name, 'epochs': bert_epochs,
-            'max_length': BERT_MAX_LENGTH, 'stride': BERT_STRIDE,
-            'batch_size': BERT_BATCH_SIZE, 'gradient_accumulation': BERT_GRAD_ACCUMULATION,
-            'learning_rate': BERT_LEARNING_RATE, 'aggregation': 'max_window_probability',
-            'text_policy': 'decoded subject/body; no stopword removal or lemmatization',
-            'window_labels': 'inherited from training email; equal total weight per email',
-            'torch': torch.__version__, 'transformers': transformers.__version__,
-            'device': str(bert.device),
-        }
     pd.DataFrame(trials).to_csv(output / 'validation_results.csv', index=False)
     selected_name = max(decisions, key=lambda name: validation_rank(decisions[name]))
     if not decisions[selected_name]['precision_target_met']:
@@ -541,22 +491,6 @@ def training(data=None, output_dir=BASE_DIR, candidates=None, epochs=DOC2VEC_EPO
         artifacts.append(path)
         configurations[name] = {'file': path.name, **decision}
     parameters = {name: model.get_params(deep=False) for name, (model, _) in winners.items()}
-    if train_bert:
-        # Test probabilities are generated only after checkpoint/threshold selection.
-        # Test labels are never supplied to BERT fitting or checkpoint selection.
-        for split, scores in (
-                ('validation', bert_validation_scores),
-                ('test', positive_scores(bert, semantic_data['test']))):
-            path = output / f'data_bert_{split}_scores.npy'
-            np.save(path, scores)
-            artifacts.append(path)
-        artifacts.extend(sorted((model_dir / 'bert').rglob('*')))
-        artifacts = [path for path in artifacts if path.is_file()]
-        configurations['BERT'] = {
-            'kind': 'bert', 'directory': 'bert',
-            'test_scores': 'data_bert_test_scores.npy',
-            'validation_scores': 'data_bert_validation_scores.npy', **decisions['BERT']}
-        parameters['BERT'] = settings['bert']
     save_json(output / 'selected_parameters.json', parameters)
     manifest = {'status': 'complete', 'schema_version': 2, 'target_mode': target_mode,
                 'positive_label': POSITIVE_LABELS[target_mode],
@@ -573,8 +507,9 @@ if __name__ == '__main__':
     import argparse
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    parser = argparse.ArgumentParser(description='Audited email pipeline and five specialist branches')
-    parser.add_argument('--mode', choices=('specialists', 'baseline'), default='specialists')
+    parser = argparse.ArgumentParser(description='Audited email pipeline: Doc2Vec + 9 classifiers, one selected '
+                                     'on validation (default), or four specialist branches')
+    parser.add_argument('--mode', choices=('specialists', 'baseline'), default='baseline')
     parser.add_argument('--target-mode', choices=TARGET_MODES, default=TARGET_MODE,
                         help="Two-stage filter: 'broad' trains stage 1, 'phishing_vs_spam' stage 2")
     parser.add_argument('--output', type=Path)
@@ -583,15 +518,14 @@ if __name__ == '__main__':
     parser.add_argument('--workers', type=int, default=None)
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--audit-only', action='store_true', help='Stream every dataset record and verify ingestion accounting')
-    parser.add_argument('--skip-text-training', action='store_true')
     parser.add_argument('--branch-labels', type=Path)
-    parser.add_argument('--bert-epochs', type=int, default=BERT_EPOCHS)
-    parser.add_argument('--bert-model', default=BERT_MODEL_NAME, help='Initial pretrained BERT checkpoint')
     parser.add_argument('--resume', type=Path, help='Resume prepared data into a new output directory')
+    parser.add_argument('--features-only', action='store_true',
+                        help='Baseline: parse email and export features only (run inside the sandbox)')
+    parser.add_argument('--from-features', type=Path,
+                        help='Baseline: train from a --features-only export, without reading raw email')
     parser.add_argument('--feature-set', choices=FEATURE_SETS, default='full',
-                        help="Baseline only: 'no_html_presence' drops is_html/html_to_text_ratio; "
-                             "'html_content' also adds HTML content counts; "
-                             "'no_era_proxies' also drops URL scheme counts and has_hidden_elements")
+                        help="Baseline only: 'no_era_proxies' drops URL scheme counts and has_hidden_elements")
     args = parser.parse_args()
     output = args.output or BASE_DIR / 'runs' / datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).strftime('%Y%m%d_%H%M%S_%f')
     if args.audit_only:
@@ -599,18 +533,21 @@ if __name__ == '__main__':
         summary = audit_dataset(args.dataset_dir or BASE_DIR / 'Dataset', output)
         print('Audit:', summary['status'], '; emails loaded:', summary['counts'].get('emails_loaded', 0))
     elif args.mode == 'specialists':
-        if args.feature_set != 'full':
-            parser.error('--feature-set applies to baseline mode')
+        if args.feature_set != 'full' or args.features_only or args.from_features:
+            parser.error('--feature-set/--features-only/--from-features apply to baseline mode')
         from specialists import run_specialists
         run_specialists(output, dataset_dir=args.dataset_dir, cache_dir=args.cache_dir, target_mode=args.target_mode,
                         workers=args.workers, branch_labels=args.branch_labels,
-                        prepare_only=args.prepare_only, train_text=not args.skip_text_training,
-                        bert_epochs=args.bert_epochs, bert_model_name=args.bert_model, resume=args.resume)
+                        prepare_only=args.prepare_only, resume=args.resume)
     else:
         if args.prepare_only or args.resume or args.branch_labels or args.dataset_dir:
             parser.error('Preparation/resume/dataset options apply to specialist mode')
+        if args.features_only and args.from_features:
+            parser.error('--features-only and --from-features are the two separate stages')
+        if args.features_only and args.feature_set != 'full':
+            parser.error('--feature-set applies when training; --features-only exports every feature')
         if output.exists() and any(output.iterdir()):
             parser.error('Choose a new output directory')
-        training(output_dir=output, train_bert=not args.skip_text_training, target_mode=args.target_mode,
-                 bert_epochs=args.bert_epochs, bert_model_name=args.bert_model,
-                 cache_dir=args.cache_dir, workers=args.workers, feature_set=args.feature_set)
+        training(output_dir=output, target_mode=args.target_mode, cache_dir=args.cache_dir, workers=args.workers,
+                 features_only=args.features_only, from_features=args.from_features,
+                 feature_set=args.feature_set)

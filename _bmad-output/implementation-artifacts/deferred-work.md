@@ -53,3 +53,27 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-web-serve-v6-xgboost.md`
   summary: Review the served v6 XGBoost's top factors (especially hdr_* and mime_* features) for dataset-source bias now that they are shown to users, and add "Known dataset bias" notes where measured.
   evidence: Unverified (medium if true): only num_attachments carries a note; settle with per-source feature rates or pred_contribs summaries per source on data_X_test.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-merge-upstream-v6-code.md`
+  summary: Pin line endings of root preprocess.py and pipeline_cache.py (root .gitattributes, LF like the a202d55 blobs or CRLF like upstream's training checkout)
+  evidence: preprocessing_signature hashes file bytes and core.autocrlf=true, so the root signature changes between checkouts (cache invalidation, run signature drift); CRLF would make root signatures equal baseline_v6's 4c010fc3.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-merge-upstream-v6-code.md`
+  summary: Fix _simhash None/int column being cast to float64 in upstream group_email_variants/pipeline_cache (report upstream first)
+  evidence: Verified: pandas stores [None, 2**64-3] as float64 and int() returns 2**64, so near-duplicate grouping uses rounded fingerprints; v6 was trained with the same behaviour, so a fix changes splits.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-merge-upstream-v6-code.md`
+  summary: Check CompressedEmail str->bytes change for CSV rows (CLI path vs training(data=...))
+  evidence: Edge-case reviewer reports clean_text/features differ between the two paths; unverified here; would be medium if true.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-merge-upstream-v6-code.md`
+  summary: Add an audit_dataset test with malspam and trec07p
+  evidence: --audit-only has its own source list that no test runs, so it can drift from load_training_emails.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-merge-upstream-v6-code.md`
+  summary: AGENTS.md: disclose malspam/EPVME in the positive class, exempt byte-identical upstream files from the Vietnamese-comment rule, and note the local baseline_v6 manifest (867316b, MLP) differs from upstream 3c88826 (XGBoost)
+  evidence: Review of the v6 merge; agent-context edits are deferred by the review workflow.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-merge-upstream-v6-code.md`
+  summary: Upstream robustness gaps: malspam zip NotImplementedError/EOFError, scratch ledger/raw-email store left on crash, predict_specialists KeyError on old BERT manifests, lone surrogate in str email
+  evidence: All in byte-identical upstream code; low impact locally (no malspam data, no old specialist manifests in use).

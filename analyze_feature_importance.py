@@ -19,6 +19,7 @@
 #   python analyze_feature_importance.py --top-n 25 --out-dir ./importance_report
 
 import argparse
+import json
 import os
 import pickle
 
@@ -28,7 +29,7 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 
-from preprocess import FEATURE_NAMES
+from preprocess import BASELINE_FEATURE_NAMES
 
 DOC2VEC_DIM = 100
 
@@ -37,10 +38,16 @@ TREE_BASED_MODELS = [
 ]
 
 
-def build_full_feature_names():
-    """Tên đầy đủ cho 142 chiều: 100 chiều Doc2Vec + 42 engineered feature,
-    ĐÚNG THEO THỨ TỰ ghép trong train.py (np.hstack([doc2vec, engineered]))."""
-    return [f"doc2vec_dim_{i}" for i in range(DOC2VEC_DIM)] + list(FEATURE_NAMES)
+def build_full_feature_names(model_dir=None):
+    """100 chiều Doc2Vec + engineered feature, ĐÚNG THEO THỨ TỰ ghép trong train.py
+    (np.hstack([doc2vec, engineered])). Lấy tên từ run_manifest.json nếu có, vì run cũ
+    (153 chiều) và run mới (BASELINE_FEATURE_NAMES) có số feature khác nhau."""
+    names = list(BASELINE_FEATURE_NAMES)
+    manifest = os.path.join(model_dir or "", "run_manifest.json")
+    if model_dir and os.path.exists(manifest):
+        with open(manifest, encoding="utf-8") as f:
+            names = json.load(f).get("settings", {}).get("feature_names", names)
+    return [f"doc2vec_dim_{i}" for i in range(DOC2VEC_DIM)] + list(names)
 
 
 def load_model(model_dir, name):
@@ -68,7 +75,8 @@ def analyze_one_model(name, model, feature_names, top_n):
 
     print(f"\n=== {name} ===")
     print(f"  Tổng importance khối Doc2Vec (100 chiều):     {doc2vec_mass/total*100:5.1f}%")
-    print(f"  Tổng importance khối Engineered (42 feature): {engineered_mass/total*100:5.1f}%")
+    print(f"  Tổng importance khối Engineered ({len(feature_names) - DOC2VEC_DIM} feature): "
+          f"{engineered_mass/total*100:5.1f}%")
 
     order = np.argsort(importances)[::-1][:top_n]
     print(f"  Top {top_n} feature quan trọng nhất:")
@@ -120,7 +128,7 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
-    feature_names = build_full_feature_names()
+    feature_names = build_full_feature_names(args.model_dir)
 
     all_rows = []
     any_model_found = False

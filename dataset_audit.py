@@ -1,8 +1,11 @@
 """Durable ingestion accounting. Payloads are stored only for rejected records."""
 import hashlib
 import json
+import os
+import shutil
 import sqlite3
 import time
+import uuid
 from collections import Counter
 from pathlib import Path
 
@@ -19,7 +22,16 @@ class DatasetAudit:
         self.path = self.output / 'ingestion.sqlite'
         if self.path.exists():
             raise FileExistsError(f'Use a new run directory: {self.path}')
-        self.db = sqlite3.connect(self.path)
+        # In the sandbox the run folder is a Windows bind mount, where SQLite's small random
+        # writes took ~2 h instead of ~10 min. IAP491_SCRATCH_DIR (a Linux volume) holds the
+        # ledger while it is written; finish() moves it into the run folder in one copy.
+        scratch = os.environ.get('IAP491_SCRATCH_DIR')
+        if scratch:
+            Path(scratch).mkdir(parents=True, exist_ok=True)
+            self.work_path = Path(scratch) / f'ingestion-{uuid.uuid4().hex}.sqlite'
+        else:
+            self.work_path = self.path
+        self.db = sqlite3.connect(self.work_path)
         self.db.executescript('''
             PRAGMA journal_mode=WAL;
             PRAGMA cache_size=-131072;
@@ -66,6 +78,12 @@ class DatasetAudit:
                    'provenance': provenance, 'ledger': self.path.name}
         (self.output / 'load_summary.json').write_text(
             json.dumps(summary, indent=2, ensure_ascii=False), encoding='utf-8')
+        if self.work_path != self.path:
+            self.db.execute('PRAGMA wal_checkpoint(TRUNCATE)')  # everything into the main file
         self.db.close()
         self.db = None
+        if self.work_path != self.path:
+            shutil.move(str(self.work_path), str(self.path))
+            for suffix in ('-wal', '-shm'):
+                Path(str(self.work_path) + suffix).unlink(missing_ok=True)
         return summary

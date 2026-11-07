@@ -239,13 +239,16 @@ class EvaluationTests(unittest.TestCase):
         self.assertIn("Test provenance is not aligned", failed.stderr)
         self.assertFalse((self.base / "evaluation_results.csv").exists())
 
-    def test_misaligned_bert_scores_are_rejected(self):
+    def test_bert_entries_of_older_runs_are_skipped(self):
+        # Pipeline v6 đã bỏ BERT: run cũ còn mục BERT vẫn đánh giá được các classifier khác.
         np.save(self.base / "data_bert_test_scores.npy", np.full(len(self.y) - 1, 0.5))
         self.write_run(extra_models={"BERT": {"kind": "bert", "test_scores": "data_bert_test_scores.npy",
                                               "threshold": 0.5}})
-        failed = self.run_evaluation()
-        self.assertIn("BERT probabilities are invalid or not aligned", failed.stderr)
-        self.assertFalse((self.base / "evaluation_results.csv").exists())
+        completed = self.run_evaluation()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Skipping BERT", completed.stdout)
+        rows = pd.read_csv(self.base / "evaluation_results.csv")
+        self.assertEqual(set(rows.Model), set(self.thresholds))
 
     def test_legacy_run_without_manifest_uses_default_threshold(self):
         (self.models / "run_manifest.json").unlink()
@@ -258,10 +261,12 @@ class EvaluationTests(unittest.TestCase):
     def test_interrupted_training_leaves_run_that_evaluation_rejects(self):
         import train
         output = self.base / "interrupted"
-        with patch.object(train, "prepare_data", side_effect=RuntimeError("training interrupted")), \
+        # Manifest "incomplete" được ghi sau bước trích feature, trước khi vectorize/train.
+        with patch.object(train, "prepare_features", return_value=({}, {})), \
+             patch.object(train, "vectorize", side_effect=RuntimeError("training interrupted")), \
              patch("builtins.print"):
             with self.assertRaisesRegex(RuntimeError, "training interrupted"):
-                train.training(data=pd.DataFrame(), output_dir=output, train_bert=False, run_ablation=False)
+                train.training(data=pd.DataFrame(), output_dir=output, run_ablation=False)
         manifest = json.loads((output / "dumped_models" / "classification" / "run_manifest.json").read_text())
         self.assertEqual(manifest, {"status": "incomplete"})
         with self.assertRaisesRegex(RuntimeError, "Training is incomplete"):
@@ -269,7 +274,10 @@ class EvaluationTests(unittest.TestCase):
 
 
 class ArtifactStoreTests(unittest.TestCase):
-    """artifact_store.py vẫn phục vụ run web demo đang pin."""
+    """artifact_store.py (định dạng publish cũ, kiểm theo preprocess.FEATURE_NAMES hiện tại).
+
+    Web không còn dùng nó; run cũ trong dumped_models/classification/runs/ có danh sách
+    feature khác FEATURE_NAMES hiện tại nên không qua được verify_run."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

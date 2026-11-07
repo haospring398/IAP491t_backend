@@ -1,4 +1,4 @@
-"""Five specialists, separate inputs/targets, and explicit missing-label states."""
+"""Four tabular specialists, separate inputs/targets, and explicit missing-label states."""
 from pathlib import Path
 import json
 import pickle
@@ -24,7 +24,6 @@ EXTRA_FEATURE_COLUMNS = ('_message_security', '_link_features', '_attachment_pay
 
 
 BRANCHES = {
-    'text': {'algorithm': 'BERT', 'target': 'email_phishing', 'features': []},
     'header': {'algorithm': 'Gradient Boosting', 'target': 'email_phishing', 'features': [
         'from_domain_is_freemail', 'reply_to_differs_from_sender',
         'display_name_brand_freemail_mismatch', 'num_recipients',
@@ -51,7 +50,7 @@ def feature_dict(row):
 
 def availability(row):
     values = dict(zip(FEATURE_NAMES, row['_features']))
-    return {'text': bool(row['_text_available']), 'header': bool(row['_header_available']),
+    return {'header': bool(row['_header_available']),
             'html': bool(row['_html_features']['is_html']),
             'attachment': values['num_attachments'] > 0, 'url': values['num_urls'] > 0}
 
@@ -119,26 +118,25 @@ def prepare_specialists(data, output, cache_dir, workers=None, target_mode='phis
     matrix = np.asarray(prepared['_features'].to_list(), dtype=np.float32)
     prepared['_url_available'] = matrix[:, FEATURE_NAMES.index('num_urls')] > 0
     prepared['_attachment_available'] = matrix[:, FEATURE_NAMES.index('num_attachments')] > 0
-    prepared['_html_available'] = matrix[:, FEATURE_NAMES.index('is_html')] > 0
+    prepared['_html_available'] = [bool(item['is_html']) for item in prepared['_html_features']]
     for name, spec in BRANCHES.items():
-        if name != 'text':
-            if name == 'html':
-                vectors = np.fromiter((item[n] for item in prepared['_html_features'] for n in spec['features']),
-                                      dtype=np.float32).reshape(len(prepared), len(spec['features']))
-            else:
-                # Shared FEATURE_NAMES columns first, then branch-only features, as listed in spec.
-                shared = [n for n in spec['features'] if n in FEATURE_NAMES]
-                extra = [n for n in spec['features'] if n not in FEATURE_NAMES]
-                vectors = np.ascontiguousarray(matrix[:, [FEATURE_NAMES.index(n) for n in shared]])
-                if extra:
-                    rows = zip(*(prepared[column] for column in EXTRA_FEATURE_COLUMNS))
-                    vectors = np.hstack([vectors, np.asarray(
-                        [[merged[n] for n in extra] for merged in ({k: v for d in row for k, v in d.items()}
-                                                                    for row in rows)], dtype=np.float32)])
-            prepared[f'_{name}_vector'] = list(vectors)
+        if name == 'html':
+            vectors = np.fromiter((item[n] for item in prepared['_html_features'] for n in spec['features']),
+                                  dtype=np.float32).reshape(len(prepared), len(spec['features']))
+        else:
+            # Shared FEATURE_NAMES columns first, then branch-only features, as listed in spec.
+            shared = [n for n in spec['features'] if n in FEATURE_NAMES]
+            extra = [n for n in spec['features'] if n not in FEATURE_NAMES]
+            vectors = np.ascontiguousarray(matrix[:, [FEATURE_NAMES.index(n) for n in shared]])
+            if extra:
+                rows = zip(*(prepared[column] for column in EXTRA_FEATURE_COLUMNS))
+                vectors = np.hstack([vectors, np.asarray(
+                    [[merged[n] for n in extra] for merged in ({k: v for d in row for k, v in d.items()}
+                                                                for row in rows)], dtype=np.float32)])
+        prepared[f'_{name}_vector'] = list(vectors)
     del matrix
     # Raw MIME stays in original dataset; retain only prepared inputs for resuming.
-    prepared = prepared.drop(columns=['Text', '_group_body', '_clean_text', '_features', '_html_features',
+    prepared = prepared.drop(columns=['Text', '_group_key', '_simhash', '_clean_text', '_features', '_html_features',
                                       *EXTRA_FEATURE_COLUMNS, '_text_obfuscation', '_content_indicators'])
     parts = dict(zip(('train', 'validation', 'test'), split_train_validation_test(prepared, seed=seed)))
     provenance = ['RecordId', 'Source', 'Location', 'LabelKind', 'LabelBasis',
@@ -163,20 +161,19 @@ def prepare_specialists(data, output, cache_dir, workers=None, target_mode='phis
 
 
 def branch_inputs(frame, name):
-    return frame['_semantic_text'].to_list() if name == 'text' else np.stack(frame[f'_{name}_vector'].to_list())
+    return np.stack(frame[f'_{name}_vector'].to_list())
 
 
 def train_specialists(parts, output, branch_labels=None, precision_target=0.9,
-                      train_text=True, bert_model_name='google-bert/bert-base-uncased',
-                      bert_epochs=3, preprocessing=None, prepare_only=False, target_mode='phishing'):
+                      preprocessing=None, prepare_only=False, target_mode='phishing'):
     from train import POSITIVE_LABELS
     output = Path(output)
     annotations = load_branch_labels(branch_labels, pd.concat(parts.values(), ignore_index=True))
     # Class 1 of email-level branches is POSITIVE_LABELS[target_mode]; in stage 2 Class 0 is spam.
-    manifest = {'schema_version': 1, 'kind': 'five_specialists', 'status': 'incomplete',
+    manifest = {'schema_version': 1, 'kind': 'four_specialists', 'status': 'incomplete',
                 'target_mode': target_mode, 'positive_label': POSITIVE_LABELS[target_mode],
                 'preprocessing': preprocessing, 'branches': {}, 'test_used_for_selection': False,
-                'selection_note': 'BERT requested; other algorithms from prior top-five F1. '
+                'selection_note': 'Algorithms from prior top-five F1. '
                                   'Prior scores do not establish specialist performance.'}
     manifest_path = output / 'specialist_manifest.json'
     def save():
@@ -186,9 +183,6 @@ def train_specialists(parts, output, branch_labels=None, precision_target=0.9,
     for name, spec in BRANCHES.items():
         config = {**spec, 'status': 'preparing', 'precision_target': precision_target,
                   'label_source': 'email phishing label' if spec['target'] == 'email_phishing' else 'reviewed branch annotations'}
-        if name == 'text':
-            config.update(initial_checkpoint=bert_model_name, epochs=bert_epochs,
-                          text_policy='decoded subject/body; attachment text not included')
         manifest['branches'][name] = config
         selected = {}
         for split, frame in parts.items():
@@ -205,42 +199,30 @@ def train_specialists(parts, output, branch_labels=None, precision_target=0.9,
             config.update(status='awaiting_labels', reason='Need both verified classes in train and validation')
             save()
             continue
-        if prepare_only or (name == 'text' and not train_text):
+        if prepare_only:
             config.update(status='ready_to_train', reason='Training explicitly deferred')
             save()
             continue
         train_frame, val_frame = selected['train'], selected['validation']
         y_train, y_val = train_frame._target.to_numpy(dtype=int), val_frame._target.to_numpy(dtype=int)
         config['training_class_counts'] = {str(label): int((y_train == label).sum()) for label in (0, 1)}
-        if name == 'text':
-            from train import train_bert_classifier, BERT_BATCH_SIZE, BERT_MAX_LENGTH, BERT_STRIDE
-            from preprocess import BertEmailClassifier
-            model = BertEmailClassifier.from_pretrained(bert_model_name, batch_size=BERT_BATCH_SIZE,
-                                                        max_length=BERT_MAX_LENGTH, stride=BERT_STRIDE)
-            model.model.config.email_positive_label = POSITIVE_LABELS[target_mode]
-            model, decision, bert_trials, _ = train_bert_classifier(
-                model, branch_inputs(train_frame, name), y_train,
-                branch_inputs(val_frame, name), y_val, output / 'text_bert', precision_target, epochs=bert_epochs)
-            config['directory'] = 'text_bert'
-            trials.extend({'Branch': name, **r} for r in bert_trials)
+        model = make_estimator(name)
+        final_estimator = model.steps[-1][1] if hasattr(model, 'steps') else model
+        config['hyperparameters'] = final_estimator.get_params(deep=False)
+        print(f'Training {name}: {spec["algorithm"]}, rows={len(train_frame)}, features={len(spec["features"])}', flush=True)
+        weights = compute_sample_weight('balanced', y_train)
+        if hasattr(model, 'steps'):
+            step_name, final = model.steps[-1]
+            fit_params = {f'{step_name}__sample_weight': weights} if (
+                name != 'url' and 'sample_weight' in inspect.signature(final.fit).parameters) else {}
         else:
-            model = make_estimator(name)
-            final_estimator = model.steps[-1][1] if hasattr(model, 'steps') else model
-            config['hyperparameters'] = final_estimator.get_params(deep=False)
-            print(f'Training {name}: {spec["algorithm"]}, rows={len(train_frame)}, features={len(spec["features"])}', flush=True)
-            weights = compute_sample_weight('balanced', y_train)
-            if hasattr(model, 'steps'):
-                step_name, final = model.steps[-1]
-                fit_params = {f'{step_name}__sample_weight': weights} if (
-                    name != 'url' and 'sample_weight' in inspect.signature(final.fit).parameters) else {}
-            else:
-                fit_params = {'sample_weight': weights}
-            model.fit(branch_inputs(train_frame, name), y_train, **fit_params)
-            decision = select_threshold(y_val, positive_scores(model, branch_inputs(val_frame, name)), precision_target)
-            config['file'] = f'{name}.pkl'
-            with (output / config['file']).open('wb') as handle:
-                pickle.dump(model, handle)
-            trials.append({'Branch': name, **decision})
+            fit_params = {'sample_weight': weights}
+        model.fit(branch_inputs(train_frame, name), y_train, **fit_params)
+        decision = select_threshold(y_val, positive_scores(model, branch_inputs(val_frame, name)), precision_target)
+        config['file'] = f'{name}.pkl'
+        with (output / config['file']).open('wb') as handle:
+            pickle.dump(model, handle)
+        trials.append({'Branch': name, **decision})
         config.update(status='trained', **decision)
         for split in ('validation', 'test'):
             frame = selected[split]
@@ -259,11 +241,6 @@ def train_specialists(parts, output, branch_labels=None, precision_target=0.9,
                                       'Positives': int(y[index].sum()), 'Flagged': int(flagged[index].sum()),
                                       'FlaggedRate': float(flagged[index].mean())})
         save()
-        if name == 'text':
-            del model
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
     pd.DataFrame(metrics, columns=['Branch', 'Algorithm', 'Target', 'Split', 'Rows',
         'Accuracy', 'F1-score', 'F2-score', 'Precision', 'Recall', 'ROC-AUC', 'Average-Precision',
         'FPR', 'FNR', 'TN', 'FP', 'FN', 'TP']).to_csv(output / 'specialist_evaluation.csv', index=False)
@@ -280,12 +257,9 @@ def train_specialists(parts, output, branch_labels=None, precision_target=0.9,
                              if (output / f'{name}_{split}_scores.csv').exists())
             if 'file' in config:
                 artifacts.append(config['file'])
-            if 'directory' in config:
-                artifacts.extend(str(p.relative_to(output)) for p in (output / config['directory']).rglob('*') if p.is_file())
     manifest['artifacts'] = {p: file_digest(output / p) for p in artifacts if (output / p).exists()}
     manifest['inference_artifacts'] = {p: digest for p, digest in manifest['artifacts'].items()
-                                      if p.endswith('.pkl') and p != 'prepared_specialists.pkl'
-                                      or p.startswith('text_bert')}
+                                      if p.endswith('.pkl') and p != 'prepared_specialists.pkl'}
     if branch_labels is not None:
         import shutil
         label_copy = output / 'branch_labels_used.csv'
@@ -337,8 +311,7 @@ def evaluate_specialists(output):
 
 
 def run_specialists(output, dataset_dir=None, cache_dir=None, workers=None,
-                    branch_labels=None, prepare_only=False, train_text=True, bert_epochs=3,
-                    bert_model_name='google-bert/bert-base-uncased', resume=None, target_mode='phishing'):
+                    branch_labels=None, prepare_only=False, resume=None, target_mode='phishing'):
     from train import load_training_emails
     output = Path(output)
     if output.exists() and any(output.iterdir()):
@@ -367,12 +340,16 @@ def run_specialists(output, dataset_dir=None, cache_dir=None, workers=None,
                     'preprocessing_identity.json', 'preprocessing_features.json', 'ingestion.sqlite'}):
                 shutil.copy2(path, output / path.name)
     else:
-        data = load_training_emails(output, dataset_dir=dataset_dir)
-        parts, preprocessing = prepare_specialists(data, output,
-            cache_dir or Path(__file__).resolve().parent / '.pipeline_cache', workers=workers,
-            target_mode=target_mode)
+        from train import raw_email_store
+        store = raw_email_store(output)
+        try:
+            data = load_training_emails(output, dataset_dir=dataset_dir, compress=True, store=store)
+            parts, preprocessing = prepare_specialists(data, output,
+                cache_dir or Path(__file__).resolve().parent / '.pipeline_cache', workers=workers,
+                target_mode=target_mode)
+        finally:
+            store.close()
     manifest = train_specialists(parts, output, branch_labels=branch_labels,
-        prepare_only=prepare_only, train_text=train_text, bert_epochs=bert_epochs,
-        bert_model_name=bert_model_name, preprocessing=preprocessing, target_mode=target_mode)
+        prepare_only=prepare_only, preprocessing=preprocessing, target_mode=target_mode)
     print('Specialists:', {name: c['status'] for name, c in manifest['branches'].items()}, flush=True)
     return manifest

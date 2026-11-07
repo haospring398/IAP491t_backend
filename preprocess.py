@@ -30,11 +30,6 @@ from email import policy
 from email.header import decode_header
 from functools import lru_cache
 from collections import defaultdict
-from textblob import TextBlob
-import nltk
-from nltk.corpus import wordnet
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
 
 import email
 from email.utils import parseaddr, getaddresses
@@ -62,9 +57,10 @@ def expand_negations(text):
 
 
 def spelling_correction(text):
-    text = TextBlob(text)
-    text = text.correct()
-    return text
+    # Unused by the pipeline. TextBlob pulls in nltk, which was removed for an unfixed CVE
+    # (2026-10-26); install textblob separately to call this.
+    from textblob import TextBlob
+    return TextBlob(text).correct()
 
 
 def remove_stopwords(text):
@@ -114,11 +110,56 @@ def _content_subject(msg):
 # models learn the literal word "phishing" as the label. Headers and link features keep
 # it: a recipient address inside a URL is a genuine kit signal. No word boundaries: the
 # maintainer's sed often glued it to neighbours ("phishing@potSie", "&#phishing@pot6;").
-_REDACTION_PLACEHOLDERS = re.compile(r"phishing\s*(?:@|%40|&#0*64;|&commat;|\[at\]|\(at\))\s*pot", re.I)
+# The second alternative is the neutral recipient that _normalize_redactions() writes
+# for malware-traffic-analysis.net placeholders.
+_REDACTION_PLACEHOLDERS = re.compile(r"phishing\s*(?:@|%40|&#0*64;|&commat;|\[at\]|\(at\))\s*pot|"
+                                     r"(?:(?:recipient|sender)(?:@|%40))?(?:mail\.)?(?:recipient|sender)-domain\.example",
+                                     re.I)
+
+# malware-traffic-analysis.net redacts malspam by hand: "[recipient's email address]",
+# "[recipient's email domain]", "[removed]"... (95% of its emails). Recipient addresses
+# become one neutral address under the reserved .example TLD, so To and personalised
+# URLs (?n=[recipient's email address]) still look like an address to header and link
+# features; names and other redactions are dropped ("Customer" would fake a generic
+# greeting). The text pipeline then masks the neutral address like phishing@pot.
+# "recip" also covers the author's typos ("[recipeint's email domain]"); spoofed senders
+# ("[spoofed sender email address]") get their own neutral address so From-based header
+# features still see one. Anything "...removed..." or naming a person is dropped.
+_RECIPIENT_PLACEHOLDER = re.compile(rb"\[[^\]\r\n]{0,40}recip[^\]\r\n]{0,60}\]", re.I)
+_SENDER_PLACEHOLDER = re.compile(rb"\[[^\]\r\n]{0,30}sender[^\]\r\n]{0,40}\]", re.I)
+_AUTHOR_REDACTION = re.compile(rb"\[(?:[^\]\r\n]{0,40}\bremoved\b[^\]\r\n]{0,20}|redacted|reacted|attachment omitted|"
+                               rb"malicious attachment redacted|base64 string|random name|unknown|fname lname|"
+                               rb"string of alphabetic characters)\]", re.I)
+
+
+def _neutral_party(party):
+    def replace(match):
+        placeholder = match.group(0).lower()
+        if b"name" in placeholder:
+            return b""
+        if b"domain" in placeholder:
+            return party + b"-domain.example"
+        if b"server" in placeholder:
+            return b"mail." + party + b"-domain.example"
+        return party + b"@" + party + b"-domain.example"
+    return replace
+
+
+def _normalize_redactions(raw):
+    if b"[" not in raw:
+        return raw
+    raw = _RECIPIENT_PLACEHOLDER.sub(_neutral_party(b"recipient"), raw)
+    return _AUTHOR_REDACTION.sub(b"", _SENDER_PLACEHOLDER.sub(_neutral_party(b"sender"), raw))
+
+
+# Same author redactions after MIME decoding: inside base64/quoted-printable bodies and
+# encoded-word subjects the raw-byte pass in _normalize_redactions() cannot see them.
+_DECODED_REDACTION = re.compile(r"\[[^\]\n]{0,60}(?:recip|sender|removed|redacted|spoofed)[^\]\n]{0,60}\]", re.I)
 
 
 def _without_corpus_artifacts(text):
-    return _REDACTION_PLACEHOLDERS.sub(" ", _TEMPLATE_PHRASES.sub(" ", text))
+    text = _DECODED_REDACTION.sub(" ", _TEMPLATE_PHRASES.sub(" ", text))
+    return _REDACTION_PLACEHOLDERS.sub(" ", text)
 
 
 SHORTENER_DOMAINS = {
@@ -264,7 +305,45 @@ def _safe_urlparse(url):
 
 def _find_urls(plain_text, html_text):
     combined = f"{plain_text}\n{_strip_html(html_text)}\n{html_text}"
-    return sorted(set(u.rstrip('.,);') for u in URL_REGEX.findall(combined)))
+    return sorted(set(unwrap_gateway_url(u.rstrip('.,);')) for u in URL_REGEX.findall(combined)))
+
+
+# Link rewriting added by the RECIPIENT's mail gateway, not by the sender: Outlook Safe
+# Links, Proofpoint URL Defense, Barracuda LinkProtect, Trend Micro Click-Time. It says
+# nothing about the email (only which company received it) and hides the real target, so
+# the original URL is restored before any URL feature. Sender-side redirects
+# (google.com/url, l.facebook.com) are kept: they are the open-redirect abuse
+# link_open_redirect_count measures. Opaque rewrites (Mimecast) cannot be decoded.
+_GATEWAY_REWRITES = (
+    (re.compile(r"(?:^|\.)safelinks\.protection\.(?:outlook\.com|office365\.us)$"), "", "url"),
+    (re.compile(r"^linkprotect\.cudasvc\.com$"), "", "a"),
+    (re.compile(r"(?:^|\.)trendmicro\.com$"), "/clicktime/", "url"),
+    (re.compile(r"^urldefense\.proofpoint\.com$"), "/v1/", "u"),
+)
+_PROOFPOINT_V2 = re.compile(r"^https?://urldefense\.proofpoint\.com/v2/url\?", re.I)
+_PROOFPOINT_V3 = re.compile(r"^https?://urldefense(?:\.proofpoint)?\.com/v3/__(.+?)__;", re.I)
+
+
+def unwrap_gateway_url(url):
+    """Original target of a URL rewritten by a recipient-side security gateway (nested too)."""
+    from urllib.parse import parse_qs, unquote
+    for _ in range(3):
+        v3 = _PROOFPOINT_V3.match(url)
+        if v3:
+            url = v3.group(1)
+            continue
+        parsed = _safe_urlparse(url)
+        query = parse_qs(html_module.unescape(parsed.query))
+        if _PROOFPOINT_V2.match(url) and query.get("u"):
+            url = unquote(query["u"][0].translate(str.maketrans("-_", "%/")))
+            continue
+        host = (parsed.hostname or "").lower()
+        target = next((query[key][0] for pattern, path, key in _GATEWAY_REWRITES
+                       if pattern.search(host) and path in parsed.path and query.get(key)), None)
+        if not target or not re.match(r"(?:https?:)?//|www\.", target, re.I):
+            break
+        url = target
+    return url.strip()
 
 
 def extract_url_features(plain_text, html_text):
@@ -300,7 +379,7 @@ def extract_url_features(plain_text, html_text):
         for i, m in enumerate(re.finditer(
                 r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
                 html_text, flags=re.IGNORECASE | re.DOTALL)):
-            href, anchor_html = m.group(1), m.group(2)
+            href, anchor_html = unwrap_gateway_url(html_module.unescape(m.group(1))), m.group(2)
             anchor_urls = URL_REGEX.findall(_strip_html(anchor_html))
             if anchor_urls:
                 href_domain = _safe_urlparse(href if "://" in href else "http://" + href).netloc.lower()
@@ -357,11 +436,30 @@ def normalize_url(url):
     return url if re.match(r"^[a-z][a-z0-9+.-]*://", url, re.I) else "http://" + url
 
 
+@lru_cache(maxsize=1)
+def _public_suffix_list():
+    import tldextract
+    # Snapshot bundled with the pinned tldextract version: no network fetch, so the
+    # result is reproducible. Private suffixes make user.github.io its own site.
+    return tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None, include_psl_private_domains=True)
+
+
+@lru_cache(maxsize=131072)
+def _psl_parts(host):
+    return _public_suffix_list()(host)
+
+
 def registrable_domain(host):
-    """Approximate eTLD+1 without a public-suffix download; IP hosts are kept whole."""
+    """eTLD+1 by the Public Suffix List; IP hosts are kept whole.
+
+    Hosts without a known suffix (intranet names such as Enron's) keep the last two labels.
+    """
     host = str(host).lower().strip(".")
     if re.fullmatch(r"[\d.]+|\[?[0-9a-f:]+\]?", host):
         return host
+    found = _psl_parts(host).top_domain_under_public_suffix
+    if found:
+        return found
     labels = [label for label in host.split(".") if label]
     if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in _SECOND_LEVEL_LABELS:
         return ".".join(labels[-3:])
@@ -489,6 +587,8 @@ MESSAGE_SECURITY_FEATURE_NAMES = [
     # Handbook Ch. 7.3 mismatch triangle and lookalike sender domains.
     "hdr_reply_to_freemail_divergence", "hdr_display_name_other_address",
     "hdr_display_name_brand_mismatch", "hdr_sender_brand_lookalike", "hdr_sender_brand_combosquat",
+    # Sender domain imitates a recipient's domain (lookalike of the victim's own company).
+    "hdr_sender_recipient_lookalike",
 ]
 # A cid: reference count was measured and dropped: it fired in 15-26% of every
 # EPVME family but ~0% of legitimate mail, because EPVME bodies come from
@@ -567,7 +667,12 @@ def extract_message_security_features(msg):
     sender_hosts = {d for d in (from_domain, bounce_domain, reply_domain) if d}
     impersonation = [brand_impersonation(d) for d in sender_hosts]
     display_brands = _brand_in_text(display)
+    recipient_values = raw.get("To", []) + [str(v) for v in (msg.get_all("Cc") or [])]
+    recipient_domains = {registrable_domain(_address_domain(a))
+                         for _, a in getaddresses([_decode_header_value(v) for v in recipient_values]) if "@" in a}
+    from_registered = registrable_domain(from_domain) if from_domain else ""
     values_identity = {
+        "hdr_sender_recipient_lookalike": int(any(domains_look_alike(from_registered, d) for d in recipient_domains)),
         "hdr_reply_to_freemail_divergence": int(reply_domain in FREEMAIL_DOMAINS and bool(from_domain)
                                                 and from_domain not in FREEMAIL_DOMAINS),
         "hdr_display_name_other_address": int(bool(shown_address) and bool(addresses) and
@@ -673,6 +778,275 @@ def extract_html_security_features(markup):
     return dict(zip(HTML_SECURITY_FEATURE_NAMES, values))
 
 
+# Payloads inside the HTML body: URLs in tag attributes, payloads parked in hidden
+# elements, obfuscated JavaScript and HTML injection. Static only: nothing is executed
+# or fetched. Mail clients never run scripts, so legitimate mail has no reason to carry
+# obfuscated JavaScript; JSON-LD (schema.org actions in order/flight emails) and other
+# non-script <script type> blocks are left out of the JavaScript checks.
+HTML_PAYLOAD_FEATURE_NAMES = [
+    'html_url_dangerous_scheme_count', 'html_url_obfuscated_count', 'html_form_remote_action_count',
+    'html_meta_refresh_count', 'html_base_href_count',
+    'html_hidden_offsite_url_count', 'html_hidden_encoded_payload_count', 'html_hidden_script_count',
+    'html_hidden_high_entropy_count',
+    'html_js_escape_count', 'html_js_charcode_array_max', 'html_js_string_concat_count',
+    'html_js_obfuscator_signature_count', 'html_js_max_string_entropy', 'html_js_redirect_count',
+    'html_js_dom_injection_count', 'html_js_obfuscation_score', 'html_js_obfuscated',
+    'html_injection_attr_markup_count', 'html_injection_url_payload_count', 'html_encoded_markup_count',
+    'html_dangerous_tag_count', 'html_css_injection_count',
+]
+HTML_PAYLOAD_MAX_CHARS = 2_000_000
+_URL_ATTRIBUTE = re.compile(r'''\s(href|src|action|formaction|data|background|poster|xlink:href|lowsrc|dynsrc|ping|srcset)'''
+                            r'''\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))''', re.I)
+_LINK_ATTRIBUTES = ('href', 'action', 'formaction')
+_C0_AND_SPACE = ''.join(map(chr, range(33)))
+_DANGEROUS_SCHEME = re.compile(r'^(?:javascript|vbscript|livescript|mocha|file|blob):|'
+                               r'^data:(?!image/(?:png|jpe?g|gif|webp|bmp)[;,])', re.I)
+_NUMERIC_HOST = re.compile(r'^(?:\d{8,10}|0x[0-9a-f]+|0\d+(?:\.\d+){0,3})$|(?:^|\.)0x[0-9a-f]+(?:\.|$)', re.I)
+_JS_TYPES = {'', 'text/javascript', 'application/javascript', 'module', 'text/ecmascript',
+             'application/ecmascript', 'text/jscript', 'text/vbscript', 'application/x-javascript'}
+_EVENT_HANDLER = re.compile(r'''\son[a-z]+\s*=\s*(?:"([^"]*)"|'([^']*)')''', re.I)
+_ENCODED_PAYLOAD = re.compile(r'[A-Za-z0-9+/]{100,}={0,2}|(?:[0-9a-fA-F]{2}){40,}|(?:%[0-9a-fA-F]{2}){10,}|'
+                              r'(?:\\x[0-9a-fA-F]{2}){8,}|(?:\\u[0-9a-fA-F]{4}){6,}')
+_SCRIPT_LIKE = re.compile(r'<\s*/?\s*(?:script|iframe|object|embed|svg|form)\b|(?:java|vb)script\s*:|\beval\s*\(|'
+                          r'\bdocument\s*\.\s*(?:write|cookie|location)|\bwindow\s*\.\s*location|\batob\s*\(|'
+                          r'fromCharCode|\bon(?:load|error|click|mouseover|focus)\s*=', re.I)
+_JS_ESCAPE = re.compile(r'\\x[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}|\\[0-3][0-7]{2}')
+_JS_CHARCODE_ARRAY = re.compile(r'(?:\d{1,5}\s*,\s*){7,}\d{1,5}')
+_JS_STRING_CONCAT = re.compile(r'''(["'])[^"'\\\n]{0,12}\1\s*\+\s*(?=["'])''')
+# Literals without whitespace (base64/hex/packed data); HTML strings that document.write
+# prints are long and varied too, but contain spaces.
+_JS_STRING_LITERAL = re.compile(r'''(["'`])((?:(?!\1)[^\\\s]|\\.){64,})\1''')
+_JS_OBFUSCATOR_SIGNATURES = (
+    re.compile(r'eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*[dr]\s*\)'),  # Dean Edwards packer
+    re.compile(r'[\[\]()!+]{40,}'),  # JSFuck
+    re.compile('ﾟωﾟﾉ|ﾟДﾟ|ﾟΘﾟ'),  # aaencode
+    re.compile(r'\$=~\[\];|\$\.\$\$\$\$'),  # jjencode
+)
+_JS_OBFUSCATOR_IDENTIFIER = re.compile(r'\b_0x[0-9a-f]{4,6}\b')  # obfuscator.io
+_JS_DECODE = re.compile(r'\b(?:atob|unescape|decodeURI(?:Component)?|fromCharCode)\s*\(')
+_JS_EXEC = re.compile(r'\b(?:eval|Function)\s*\(|\bdocument\s*\.\s*write(?:ln)?\s*\(|\.\s*(?:inner|outer)HTML\s*\+?=(?!=)|'
+                      r'\bset(?:Timeout|Interval)\s*\(\s*["\'`]')
+_JS_REDIRECT = re.compile(r'\b(?:(?:window|document|top|self|parent)\s*\.\s*)?location(?:\s*\.\s*href)?\s*=(?!=)|'
+                          r'\blocation\s*\.\s*(?:replace|assign)\s*\(|\bwindow\s*\.\s*open\s*\(|\.\s*submit\s*\(\s*\)')
+_JS_DOM_INJECTION = re.compile(r'\.\s*(?:inner|outer)HTML\s*\+?=(?!=)|\binsertAdjacentHTML\s*\(|'
+                               r'\bdocument\s*\.\s*write(?:ln)?\s*\(|\bnew\s+Function\s*\(|'
+                               r'\bset(?:Timeout|Interval)\s*\(\s*["\'`]|\bcreateContextualFragment\s*\(')
+_INJECTION_PAYLOAD = re.compile(r'<\s*/?\s*(?:script|svg|img|iframe|body|object|embed|form|input|a)\b|'
+                                r'\bon[a-z]+\s*=|(?:java|vb)script\s*:|["\']\s*/?>|\balert\s*\(|'
+                                r'\bdocument\s*\.\s*(?:cookie|domain|write)|\beval\s*\(', re.I)
+# Active markup only: sloppy legacy HTML leaves "8</td" or quote debris in attributes.
+_ATTRIBUTE_MARKUP = re.compile(r'<\s*(?:script|iframe|svg|img|object|embed|form|body|meta|link|base|style)\b|'
+                               r'(?:java|vb)script\s*:|\bon[a-z]+\s*=', re.I)
+_ENCODED_MARKUP = re.compile(r'(?:&lt;|&#0*60;|&#x0*3c;|%3c|\\x3c|\\u003c)\s*/?\s*'
+                             r'(?:script|iframe|object|embed|svg|form|meta|base)\b', re.I)
+_DANGEROUS_TAGS = re.compile(r'<(?:object|embed|applet|frameset|frame|isindex|foreignobject)\b|'
+                             r'<iframe\b[^>]*\bsrcdoc\s*=|<svg\b[^>]*\son[a-z]+\s*=|'
+                             r'<link\b[^>]*\brel\s*=\s*["\']?import|'
+                             r'<(?:animate|set)\b[^>]*\b(?:attributename\s*=\s*["\']?(?:xlink:)?href|to\s*=\s*["\']?javascript)', re.I)
+_CSS_INJECTION = re.compile(r'expression\s*\(|behavior\s*:\s*url|-moz-binding|'
+                            r'url\(\s*["\']?\s*(?:javascript|vbscript|data\s*:\s*text/html)', re.I)
+
+
+def _html_url_values(markup):
+    """(attribute, raw value) of every URL-bearing attribute; srcset yields one per candidate."""
+    for match in _URL_ATTRIBUTE.finditer(markup):
+        name = match.group(1).lower()
+        raw = next(v for v in match.groups()[1:] if v is not None)
+        if name == 'srcset':
+            for candidate in raw.split(','):
+                if candidate.strip():
+                    yield name, candidate.strip().split()[0]
+        else:
+            yield name, raw
+
+
+def _decoded_url(raw):
+    """The URL a browser follows: entities decoded, tab/CR/LF removed, C0 and space trimmed."""
+    return re.sub(r'[\t\r\n]', '', html_module.unescape(raw)).strip(_C0_AND_SPACE)
+
+
+def _url_is_obfuscated(raw, url):
+    """Scheme spelled with entities/control characters, backslashes, userinfo, encoded or numeric host.
+
+    Entity-encoded mailto:/tel: links are address munging against harvesters (SpamAssassin
+    ham: 130 links in newsletters), not obfuscation of a destination, and are not counted.
+    """
+    scheme = re.match(r'([a-z][a-z0-9+.-]*):', url, re.I)
+    if scheme and scheme.group(1).lower() in ('mailto', 'tel'):
+        return False
+    if scheme and not raw.strip().lower().startswith(scheme.group(1).lower() + ':'):
+        return True
+    prefix = re.match(r'(?:(?:https?|ftp):)?([\\/]{2,})', url, re.I)
+    if not prefix:
+        return False
+    if '\\' in prefix.group(1):
+        return True
+    authority = re.split(r'[/?#\\]', url[prefix.end():], maxsplit=1)[0]
+    host = authority.rsplit('@', 1)[-1].split(':')[0]
+    return '@' in authority or '%' in host or bool(_NUMERIC_HOST.search(host))
+
+
+def _url_domain(url):
+    if not re.match(r'(?:https?:)?//|www\.', url, re.I):
+        return ''
+    host = (_safe_urlparse(normalize_url(url.lstrip('/') if url.startswith('//') else url)).hostname or '').lower()
+    return registrable_domain(host) if host else ''
+
+
+def _hidden_html_content(markup, soup):
+    """Top-level hidden elements and the registrable domains linked from visible content.
+
+    Hidden: hidden attribute, hiding inline style or <style> class/id, text in the background
+    color, <input type=hidden>. Zero-size images are not counted: tracking pixels are routine.
+    """
+    from bs4.element import Comment, Declaration, Doctype, NavigableString, ProcessingInstruction, Tag
+    hidden_classes, hidden_ids = _hidden_css_selectors(markup)
+    roots, visible, hidden_links = [], set(), []
+    stack = [(soup, False, None, None)]
+    while stack:
+        node, hidden, color, background = stack.pop()
+        if isinstance(node, NavigableString):
+            if not hidden and not isinstance(node, (Comment, Declaration, Doctype, ProcessingInstruction)):
+                visible.update(_url_domain(u) for u in URL_REGEX.findall(str(node)))
+            continue
+        if not isinstance(node, Tag):
+            continue
+        name = (node.name or '').lower()
+        if name in _NON_RENDERED_TAGS:
+            continue
+        style = node.get('style', '') or ''
+        classes = {str(c).lower() for c in (node.get('class') or [])}
+        color = (_css_color(style, 'color') or
+                 (_normalize_color(node.get('color')) if name == 'font' else None) or color)
+        background = (_css_color(style, 'background-color') or _css_color(style, 'background') or
+                      _normalize_color(node.get('bgcolor')) or background)
+        hides = (node.has_attr('hidden') or _style_hides(style) or bool(classes & hidden_classes)
+                 or str(node.get('id', '')).lower() in hidden_ids
+                 or (name == 'input' and str(node.get('type', '')).strip().lower() == 'hidden')
+                 or bool(color and background and color == background))
+        if hides and not hidden:
+            roots.append(node)
+        hidden = hidden or hides
+        for attribute in _LINK_ATTRIBUTES + (() if hidden else ('src',)):
+            value = node.get(attribute)
+            if value:
+                url = unwrap_gateway_url(str(value).strip())
+                (hidden_links.append(url) if hidden else visible.add(_url_domain(url)))
+        stack.extend((child, hidden, color, background) for child in node.contents)
+    for root in roots:
+        hidden_links.extend(URL_REGEX.findall(root.get_text(' ')))
+    return roots, visible - {''}, hidden_links
+
+
+def _hidden_payload_counts(roots):
+    encoded = script = entropy = 0
+    for root in roots:
+        values = []
+        for tag in [root, *root.find_all(True)]:
+            for attribute, value in tag.attrs.items():
+                if attribute.lower() not in ('href', 'src', 'srcset', 'action', 'formaction', 'style', 'class', 'id'):
+                    values.append(' '.join(value) if isinstance(value, list) else str(value))
+        blob = root.get_text(' ') + ' ' + ' '.join(values)
+        encoded += len(_ENCODED_PAYLOAD.findall(blob))
+        script += len(_SCRIPT_LIKE.findall(blob)) + len(root.find_all(['script', 'iframe', 'object', 'embed']))
+        entropy += sum(_entropy(token) >= 4.5 for token in re.findall(r'\S{40,}', blob)
+                       if not re.match(r'(?:https?:|www\.)', token, re.I))
+    return encoded, script, entropy
+
+
+def _javascript_sources(markup, urls):
+    """<script> bodies of script types, event-handler attributes and javascript:/vbscript: URLs."""
+    from urllib.parse import unquote
+    sources = []
+    for attributes, body in re.findall(r'<script\b([^>]*)>(.*?)</script\s*>', markup, re.I | re.S):
+        kind = re.search(r'''\btype\s*=\s*["']?([^"'\s>]*)''', attributes, re.I)
+        if (kind.group(1).lower() if kind else '') in _JS_TYPES:
+            sources.append(body)
+    for tag in re.findall(r'<[a-z][^>]*>', markup, re.I):
+        sources.extend(html_module.unescape(a or b) for a, b in _EVENT_HANDLER.findall(tag))
+    sources.extend(unquote(url.split(':', 1)[1]) for url in urls if re.match(r'(?:java|vb)script:', url, re.I))
+    return '\n'.join(sources)
+
+
+def extract_html_check_features(markup):
+    """HTML_SECURITY_FEATURE_NAMES + HTML_PAYLOAD_FEATURE_NAMES, run only when the email has HTML parts.
+
+    is_html is this gate, not a model input; an email without HTML gets zeros.
+    """
+    if not markup:
+        return dict.fromkeys(HTML_SECURITY_FEATURE_NAMES + HTML_PAYLOAD_FEATURE_NAMES, 0.0)
+    return {**extract_html_security_features(markup), **extract_html_payload_features(markup)}
+
+
+def extract_html_payload_features(markup):
+    """HTML_PAYLOAD_FEATURE_NAMES for an email's HTML parts; zeros without HTML."""
+    from urllib.parse import unquote
+    values = dict.fromkeys(HTML_PAYLOAD_FEATURE_NAMES, 0.0)
+    if not markup or '<' not in markup:
+        return values
+    markup = markup[:HTML_PAYLOAD_MAX_CHARS]
+    pairs = [(name, raw, _decoded_url(raw)) for name, raw in _html_url_values(markup)]
+    urls = [url for _, _, url in pairs]
+    for name, raw, url in pairs:
+        values['html_url_dangerous_scheme_count'] += bool(_DANGEROUS_SCHEME.match(url))
+        values['html_url_obfuscated_count'] += _url_is_obfuscated(raw, url)
+        # Reflected injection: markup or script in the query/fragment of a link (decoded twice).
+        decoded = unquote(unquote(url))
+        query = decoded.partition('?')[2] or decoded.partition('#')[2]
+        values['html_injection_url_payload_count'] += bool(query and _INJECTION_PAYLOAD.search(query))
+    for form in re.findall(r'<(?:form|button|input)\b[^>]*>', markup, re.I):
+        action = re.search(r'''\s(?:form)?action\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))''', form, re.I)
+        target = _decoded_url(next(v for v in action.groups() if v is not None)) if action else ''
+        values['html_form_remote_action_count'] += bool(re.match(r'(?:https?:)?//', target, re.I)
+                                                       or _DANGEROUS_SCHEME.match(target))
+    values['html_meta_refresh_count'] = len(re.findall(r'''<meta\b[^>]*http-equiv\s*=\s*["']?refresh''', markup, re.I))
+    values['html_base_href_count'] = len(re.findall(r'<base\b[^>]*\shref\s*=', markup, re.I))
+    try:
+        soup = BeautifulSoup(markup, 'html.parser')
+        roots, visible, hidden_links = _hidden_html_content(markup, soup)
+        (values['html_hidden_encoded_payload_count'], values['html_hidden_script_count'],
+         values['html_hidden_high_entropy_count']) = _hidden_payload_counts(roots)
+        # A hidden link to a site the visible content never links to; hidden mobile/desktop
+        # variants of a newsletter link to the same sites as its visible part.
+        values['html_hidden_offsite_url_count'] = sum(
+            bool(domain) and domain not in visible for domain in map(_url_domain, hidden_links))
+        # Injected markup: an attribute value that holds active tags or script, as left when
+        # a quote breaks out of the attribute.
+        for tag in soup.find_all(True):
+            for attribute, value in tag.attrs.items():
+                value = ' '.join(value) if isinstance(value, list) else str(value)
+                name = attribute.lower()
+                values['html_injection_attr_markup_count'] += bool(
+                    name not in _LINK_ATTRIBUTES + ('src', 'style') and not name.startswith('on')
+                    and _ATTRIBUTE_MARKUP.search(value))
+    except Exception:
+        pass  # Unparseable markup keeps the regex measurements.
+    js = _javascript_sources(markup, urls)
+    if js:
+        escapes = len(_JS_ESCAPE.findall(js))
+        charcodes = max((m.group().count(',') + 1 for m in _JS_CHARCODE_ARRAY.finditer(js)), default=0)
+        concat = sum(1 for _ in _JS_STRING_CONCAT.finditer(js))
+        signatures = sum(bool(p.search(js)) for p in _JS_OBFUSCATOR_SIGNATURES) + (
+            len(set(_JS_OBFUSCATOR_IDENTIFIER.findall(js))) >= 5)
+        entropy = max((_entropy(m.group(2)) for m in _JS_STRING_LITERAL.finditer(js)), default=0.0)
+        encoded_blob = entropy >= 5.2 or bool(re.search(r'[A-Za-z0-9+/]{160,}={0,2}', js))
+        families = [escapes >= 20, charcodes >= 20, concat >= 8, signatures > 0, encoded_blob,
+                    bool(_JS_DECODE.search(js) and _JS_EXEC.search(js))]
+        values.update({'html_js_escape_count': escapes, 'html_js_charcode_array_max': charcodes,
+                       'html_js_string_concat_count': concat, 'html_js_obfuscator_signature_count': signatures,
+                       'html_js_max_string_entropy': entropy,
+                       'html_js_redirect_count': len(_JS_REDIRECT.findall(js)),
+                       'html_js_dom_injection_count': len(_JS_DOM_INJECTION.findall(js)),
+                       'html_js_obfuscation_score': sum(families),
+                       'html_js_obfuscated': int(signatures > 0 or sum(families) >= 2)})
+    values['html_encoded_markup_count'] = len(_ENCODED_MARKUP.findall(markup))
+    values['html_dangerous_tag_count'] = len(_DANGEROUS_TAGS.findall(markup))
+    css = ' '.join(re.findall(r'<style\b[^>]*>(.*?)</style\s*>', markup, re.I | re.S) +
+                   [a or b for a, b in re.findall(r'''\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')''', markup, re.I)])
+    values['html_css_injection_count'] = len(_CSS_INJECTION.findall(css))
+    return {name: float(value) for name, value in values.items()}
+
+
 # --------------------------------------------------------------------------
 # 5. Attachment
 # --------------------------------------------------------------------------
@@ -693,7 +1067,7 @@ ATTACHMENT_FEATURE_NAMES = [
     "attachment_office_active_content_count", "attachment_office_external_target_count",
     "attachment_pdf_active_content_count", "attachment_script_content_count",
     "attachment_encrypted_archive_count", "attachment_archive_limit_count",
-    "attachment_scan_error_count",
+    "attachment_scan_error_count", "attachment_disguised_active_count",
 ]
 _ACTIVE_EXTENSIONS = EXECUTABLE_EXTENSIONS | {
     ".dll", ".cpl", ".lnk", ".url", ".wsh", ".sct", ".chm", ".sh"}
@@ -701,6 +1075,39 @@ _OFFICE_ZIP_EXTENSIONS = {
     ".docx", ".xlsx", ".pptx", ".dotx", ".xltx", ".ppsx"} | MACRO_EXTENSIONS
 _BIDI_CHARS = set("\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 _MAX_SCAN_ITEMS = 512
+# Magika labels of content that runs or renders active code when opened: markup that can
+# carry script, scripts (VBScript is labelled "vba"), binaries, shortcuts, installers.
+_ACTIVE_CONTENT_LABELS = {
+    "html", "svg", "mht", "javascript", "vba", "powershell", "batch", "shell", "autoit", "autohotkey",
+    "pebin", "elf", "macho", "lnk", "internetshortcut", "jar", "javabytecode", "msi", "chm", "apk", "dex", "swf"}
+_SCRIPT_CONTENT_LABELS = {"html", "svg", "javascript", "vba", "powershell", "batch", "shell"}
+# Names a user opens as a document, picture or media file. .txt/.csv are left out: code
+# pasted into a text file is common and Magika is least certain on short plain text.
+_PASSIVE_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".rtf", ".odt", ".ods", ".odp",
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".ico",
+    ".mp3", ".mp4", ".wav", ".avi", ".mov"}
+_PASSIVE_MIME = re.compile(r"^(?:image|audio|video)/|^application/(?:pdf|msword|rtf|vnd\.ms-|vnd\.openxmlformats-|"
+                           r"vnd\.oasis\.opendocument\.)")
+
+
+@lru_cache(maxsize=1)
+def _magika():
+    from magika import Magika
+    return Magika()
+
+
+def attachment_content_type(data):
+    """Magika content-type label ("pdf", "html", "javascript", ...).
+
+    Google's deep-learning file-type classifier: it reads a few KB from the start, middle
+    and end of the bytes and is strongest where magic bytes fail, i.e. text formats such as
+    HTML, scripts and UTF-16 code. It names the type, never whether the file is malicious.
+    """
+    if not data:
+        return "empty"
+    result = _magika().identify_bytes(bytes(data))
+    return str(result.prediction.output.label) if result.ok else "unknown"
 
 
 def _attachment_magic(data):
@@ -754,6 +1161,7 @@ def inspect_email_attachments(raw_or_message):
     def inspect(data, name, mime, depth=0, parent=None):
         report = {"filename": name or "(unnamed)", "parent": parent,
                   "declared_type": mime, "detected_type": _attachment_magic(data),
+                  "content_type": attachment_content_type(data),
                   "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
                   "indicators": [], "limitations": []}
         reports.append(report)
@@ -767,7 +1175,7 @@ def inspect_email_attachments(raw_or_message):
         budget["items"] -= 1
         normalized = unicodedata.normalize("NFKC", name or "").rstrip(" .").lower()
         ext = PurePosixPath(normalized.replace("\\", "/")).suffix
-        magic = report["detected_type"]
+        magic, content = report["detected_type"], report["content_type"]
         if any(c in (name or "") for c in _BIDI_CHARS):
             flag("bidi_filename")
         if ext in _ACTIVE_EXTENSIONS:
@@ -792,6 +1200,12 @@ def inspect_email_attachments(raw_or_message):
         mime_expected = {"application/pdf": "pdf", "image/png": "png",
                          "image/jpeg": "jpeg", "image/gif": "gif"}
         if mime in mime_expected and magic != mime_expected[mime]:
+            flag("type_mismatch")
+        # Named or declared as a document/picture, but the content is active (an HTML
+        # credential page saved as invoice.pdf, a script sent as image/jpeg).
+        passive = ext in _PASSIVE_EXTENSIONS or (not ext and bool(_PASSIVE_MIME.match(mime or "")))
+        if passive and content in _ACTIVE_CONTENT_LABELS:
+            flag("disguised_active_content")
             flag("type_mismatch")
         # Find structurally plausible embedded PE headers; an MZ string alone
         # would flag innocent text too often.
@@ -822,7 +1236,7 @@ def inspect_email_attachments(raw_or_message):
             if re.search(rb"\\(?:object|objdata|objupdate)\b", data, re.I):
                 flag("office_embedded_object")
             limit("rtf_embedded_objects_not_fully_parsed")
-        if magic == "text" or ext in {".html", ".htm", ".svg", ".js", ".vbs", ".ps1", ".hta"}:
+        if magic == "text" or content in _SCRIPT_CONTENT_LABELS or ext in {".html", ".htm", ".svg", ".js", ".vbs", ".ps1", ".hta"}:
             if re.search(rb"<\s*script\b|javascript\s*:|wscript[.]shell|powershell\s|"
                          rb"ActiveXObject\s*[(]|eval\s*[(]|<\s*form\b", data, re.I):
                 flag("script_or_form_content")
@@ -928,7 +1342,7 @@ def inspect_email_attachments(raw_or_message):
         if part is None:
             reports.append({"filename": "(remaining MIME tree)", "parent": None,
                             "indicators": ["archive_limit"], "limitations": ["mime_tree_limit"],
-                            "declared_type": "", "detected_type": "unscanned", "size": None,
+                            "declared_type": "", "detected_type": "unscanned", "content_type": "unscanned", "size": None,
                             "sha256": None})
             break
         filename = part.get_filename()
@@ -950,14 +1364,14 @@ def inspect_email_attachments(raw_or_message):
         if count > ATTACHMENT_MAX_PARTS or budget["items"] <= 0:
             reports.append({"filename": "(remaining MIME parts)", "parent": None,
                             "indicators": ["archive_limit"], "limitations": ["mime_part_limit"],
-                            "declared_type": "", "detected_type": "unscanned", "size": None,
+                            "declared_type": "", "detected_type": "unscanned", "content_type": "unscanned", "size": None,
                             "sha256": None})
             break
         payload = part.get_payload()
         if not isinstance(payload, (str, bytes)):
             reports.append({"filename": filename or "(attached message)", "parent": None,
                             "indicators": [], "limitations": ["container_payload_not_directly_scanned"],
-                            "declared_type": part.get_content_type(), "detected_type": "unscanned",
+                            "declared_type": part.get_content_type(), "detected_type": "unscanned", "content_type": "unscanned",
                             "size": None, "sha256": None})
             continue
         limit = min(ATTACHMENT_MAX_BYTES, budget["bytes"])
@@ -965,7 +1379,7 @@ def inspect_email_attachments(raw_or_message):
         if limit <= 0 or len(payload) > limit * 4:
             reports.append({"filename": filename or "(unnamed)", "parent": None,
                             "indicators": ["archive_limit"], "limitations": ["mime_payload_size_limit"],
-                            "declared_type": part.get_content_type(), "detected_type": "unscanned",
+                            "declared_type": part.get_content_type(), "detected_type": "unscanned", "content_type": "unscanned",
                             "size": None, "sha256": None})
             continue
         decoded = part.get_payload(decode=True)
@@ -974,7 +1388,7 @@ def inspect_email_attachments(raw_or_message):
         if len(decoded) > limit:
             reports.append({"filename": filename or "(unnamed)", "parent": None,
                             "indicators": ["archive_limit"], "limitations": ["decoded_payload_size_limit"],
-                            "declared_type": part.get_content_type(), "detected_type": "unscanned",
+                            "declared_type": part.get_content_type(), "detected_type": "unscanned", "content_type": "unscanned",
                             "size": len(decoded), "sha256": None})
             continue
         budget["bytes"] -= len(decoded)
@@ -1012,6 +1426,7 @@ def extract_attachment_features(msg):
         "attachment_encrypted_archive_count": count("encrypted_archive"),
         "attachment_archive_limit_count": count("archive_limit", "archive_path_traversal"),
         "attachment_scan_error_count": count("scan_error"),
+        "attachment_disguised_active_count": count("disguised_active_content"),
     }
 
 
@@ -1671,6 +2086,36 @@ def brand_impersonation(host):
     return None
 
 
+def _domain_label(domain):
+    """Label before the public suffix: globex-supplies for mail.globex-supplies.co.uk."""
+    return _psl_parts(domain).domain or str(domain).split(".")[0]
+
+
+@lru_cache(maxsize=131072)
+def domains_look_alike(a, b):
+    """True when registrable domain a imitates b without being it (any domain, no list).
+
+    Same label under another suffix (amazon.de / amazon.com, hotmail.co.uk / hotmail.com)
+    is not counted: regional sites are too common. Labels under 5 characters are skipped;
+    5-character labels need a visual match, since one edit joins real names (apple/apply).
+    """
+    if not a or not b or a == b:
+        return False
+    x, y = _domain_label(a), _domain_label(b)
+    if x == y or min(len(x), len(y)) < 5:
+        return False
+    if _skeleton(x) == _skeleton(y) or y in x.split("-") or x in y.split("-"):
+        return True
+    shortest, longest = sorted((len(x), len(y)))
+    # Changed ending of a long name: globex-supply / globex-supplies.
+    if shortest >= 8 and len(os.path.commonprefix([x, y])) >= longest - 3:
+        return True
+    if shortest < 6:
+        return False
+    limit = 1 if longest < 8 else 2
+    return longest - shortest <= limit and _edit_distance(x, y) <= limit
+
+
 def _brand_in_text(text):
     words = set(re.findall(r"[a-z0-9]+", str(text).lower()))
     joined = re.sub(r"[^a-z0-9]", "", str(text).lower())
@@ -1687,7 +2132,19 @@ def _is_official_for(brand, host):
 LINK_FEATURE_NAMES = [
     "link_recipient_address_count", "link_open_redirect_count", "link_brand_lookalike_count",
     "link_brand_combosquat_count", "link_anchor_brand_mismatch_count", "link_free_hosting_count",
+    # Sender consistency: works for any domain, not only BRAND_DOMAINS. Measured and NOT
+    # used (2026-10-25): domain popularity from Tranco 262N9, because enron.com and most
+    # 2001-2008 legitimate domains are unranked in a 2026 list (Enron: all links unranked
+    # in 58% of linked mail, phishing 21-30%); and "host on a PSL private suffix", which
+    # marks era (Nazario 2015+ 14%, Phishing Pot 22%) but Nazario 2004-07 only 1.2%.
+    "link_offsite_domain_ratio", "link_sender_lookalike_count",
+    # Shape of the most unusual link host (random/generated domains).
+    "link_max_host_length", "link_max_subdomain_depth", "link_max_host_hyphen_count",
+    "link_max_host_digit_count", "link_max_host_entropy", "link_punycode_count",
 ]
+_HOST_SHAPE = {"link_max_host_length": "url_host_length", "link_max_subdomain_depth": "url_subdomain_count",
+               "link_max_host_hyphen_count": "url_host_hyphen_count",
+               "link_max_host_digit_count": "url_host_digit_count", "link_max_host_entropy": "url_host_entropy"}
 _OPEN_REDIRECT = re.compile(r"[?&#][\w.\-\[\]]*=(?:https?(?::|%3a)(?://|%2f%2f)|%2f%2f|//|www\.)", re.I)
 
 
@@ -1715,7 +2172,10 @@ def extract_link_features(msg):
     plain, markup = _get_email_body(msg)
     urls = _find_urls(plain, markup)
     markers = _recipient_markers(msg)
+    sender = parseaddr(str(msg.get("From", "")))[1]
+    sender_domain = registrable_domain(_address_domain(sender)) if "@" in sender else ""
     values = defaultdict(float)
+    link_domains = set()
     for url in urls:
         lowered = url.lower()
         values["link_recipient_address_count"] += any(m in lowered for m in markers)
@@ -1725,8 +2185,17 @@ def extract_link_features(msg):
         if verdict:
             values["link_brand_" + verdict[1] + "_count"] += 1
         values["link_free_hosting_count"] += any(host == s or host.endswith("." + s) for s in FREE_HOSTING_SUFFIXES)
+        if host:
+            link_domains.add(registrable_domain(host))
+            shape = dict(zip(URL_LEXICAL_FEATURE_NAMES, extract_url_lexical_features(url)))
+            for name, source in _HOST_SHAPE.items():
+                values[name] = max(values[name], shape[source])
+            values["link_punycode_count"] += shape["url_has_punycode"]
+    if sender_domain and link_domains:
+        values["link_offsite_domain_ratio"] = sum(d != sender_domain for d in link_domains) / len(link_domains)
+        values["link_sender_lookalike_count"] = sum(domains_look_alike(d, sender_domain) for d in link_domains)
     for match in re.finditer(r'<a\b[^>]*\bhref\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a\s*>', markup, re.I | re.S):
-        href = html_module.unescape(match.group(1)).strip()
+        href = unwrap_gateway_url(html_module.unescape(match.group(1)).strip())
         if not re.match(r"(?:https?:)?//|www\.", href, re.I):
             continue
         host = (_safe_urlparse(normalize_url(href.lstrip("/"))).hostname or "").lower()
@@ -1840,7 +2309,7 @@ def extract_attachment_payload_features(msg):
                 values["attachment_vba_suspicious_count"] += vba["suspicious"]
                 values["attachment_vba_stomping_count"] += vba["stomping"]
                 values["attachment_xlm_macro_count"] += vba["xlm"]
-        if ext in {".htm", ".html", ".shtml", ".xhtml", ".svg", ".hta"} or (
+        if ext in {".htm", ".html", ".shtml", ".xhtml", ".svg", ".hta"} or attachment_content_type(data) in {"html", "svg"} or (
                 magic == "text" and re.search(rb"<\s*(?:html|svg)\b", data[:4096], re.I)):
             blob = re.search(rb"\bnew\s+Blob\s*\(|\bBlob\s*\(", data)
             decoded = re.search(rb"\batob\s*\(", data) and re.search(rb"[A-Za-z0-9+/]{2000,}={0,2}", data)
@@ -1864,11 +2333,59 @@ def extract_attachment_payload_features(msg):
     return {name: float(values[name]) for name in ATTACHMENT_PAYLOAD_FEATURE_NAMES}
 
 
+# Files sent as a cloud link instead of a MIME part: Gmail turns attachments over 25 MB
+# into Drive links, Outlook into OneDrive/SharePoint links, iCloud Mail into Mail Drop,
+# Proton Mail into Proton Drive links; transfer services work from any client. The MIME
+# attachment checks never see these files. Evidence only, not a model input: the
+# legitimate corpora predate these services, so the model would learn "modern = phishing".
+CLOUD_FILE_LINKS = (
+    ("google_drive", r"^(?:drive|docs)\.google\.com$", r"^/(?:file|document|spreadsheets|presentation|drawings|forms)/|"
+                                                       r"^/(?:open|uc)$|^/drive/folders/"),
+    ("google_drive", r"^drive\.usercontent\.google\.com$", r""),
+    ("onedrive_sharepoint", r"^1drv\.ms$|^onedrive\.live\.com$|(?:^|\.)sharepoint\.com$", r""),
+    ("dropbox", r"^(?:www\.)?dropbox\.com$", r"^/(?:s|scl|sh|t|l)/"),
+    ("dropbox", r"(?:^|\.)dropboxusercontent\.com$", r""),
+    ("icloud", r"^(?:www\.)?icloud\.com$", r"^/(?:attachment|iclouddrive)/"),
+    ("proton_drive", r"^drive\.proton\.me$", r"^/urls/"),
+    ("wetransfer", r"^we\.tl$", r""),
+    ("wetransfer", r"^(?:www\.)?wetransfer\.com$", r"^/downloads/"),
+    ("box", r"^(?:app\.)?box\.com$|\.app\.box\.com$", r"^/s/"),
+    ("mega", r"^mega\.(?:nz|io)$", r"^/(?:file|folder)/"),
+    ("zoho_workdrive", r"^workdrive\.zoho(?:external)?\.[a-z.]+$", r""),
+    ("adobe", r"^(?:acrobat|documentcloud)\.adobe\.com$", r"^/(?:id|link)/"),
+)
+_CLOUD_FILE_LINKS = [(p, re.compile(h), re.compile(path)) for p, h, path in CLOUD_FILE_LINKS]
+# Genuine share notifications pass SPF/DKIM/DMARC (they come from the provider), so
+# attackers put the lure in the sharer's message or in the shared file itself.
+CLOUD_SHARE_SENDERS = {
+    "drive-shares-dm-noreply@google.com", "drive-shares-noreply@google.com", "comments-noreply@docs.google.com",
+    "no-reply@sharepointonline.com", "no-reply@dropbox.com", "no-reply@dropboxmail.com",
+    "noreply@wetransfer.com", "noreply@box.com",
+}
+
+
+def cloud_file_provider(url):
+    """Provider name when the URL points at a shared cloud file or folder, else ""."""
+    parsed = _safe_urlparse(normalize_url(url))
+    host = (parsed.hostname or "").lower()
+    return next((provider for provider, host_re, path_re in _CLOUD_FILE_LINKS
+                 if host_re.search(host) and path_re.search(parsed.path or "/")), "")
+
+
+def inspect_cloud_file_links(raw_or_message):
+    """Cloud-hosted 'attachments' of one email: [{"provider", "url"}], gateway rewrites removed."""
+    msg = _parse_email(raw_or_message)
+    plain, markup = _get_email_body(msg)
+    return [{"provider": provider, "url": url} for url in _find_urls(plain, markup)
+            for provider in [cloud_file_provider(url)] if provider]
+
+
 # BEC / callback indicators (Ch. 9.4). The corpora contain almost no BEC, so these are
-# evidence for a rule layer, not model inputs.
+# evidence for a rule layer, not model inputs; so are the cloud-file links above.
 CONTENT_INDICATOR_NAMES = [
     "bec_secrecy_count", "bec_channel_switch_count", "bec_payment_change_count",
     "bec_gift_card_count", "callback_phone_count", "mail_merge_token_count",
+    "cloud_file_link_count", "cloud_share_notification",
 ]
 _CONTENT_PATTERNS = {
     "bec_secrecy_count": r"\b(?:keep (?:this|it) (?:confidential|between us|quiet|private)|"
@@ -1892,6 +2409,9 @@ def extract_content_indicators(msg):
     values["callback_phone_count"] = float(len(_PHONE.findall(text))) if re.search(
         r"\b(?:call|phone|dial|contact (?:us|support))\b[^.\n]{0,80}\b(?:cancel|renew|subscription|refund|charged?|order)\b|"
         r"\b(?:cancel|renew|subscription|refund|charged?|order)\b[^.\n]{0,80}\b(?:call|phone|dial)\b", text, re.I) else 0.0
+    values["cloud_file_link_count"] = float(len(inspect_cloud_file_links(msg)))
+    sender = parseaddr(str(msg.get("From", "")))[1].lower()
+    values["cloud_share_notification"] = float(sender in CLOUD_SHARE_SENDERS)
     return {name: values[name] for name in CONTENT_INDICATOR_NAMES}
 
 
@@ -1920,8 +2440,13 @@ FEATURE_NAMES = [
     # thập/archive dữ liệu, không phải bản chất email.
     "subject_is_reply_or_fwd",
     "from_display_name_length",
-    "is_html", "has_form_tag", "has_script_tag", "has_hidden_elements",
-    "is_image_only", "html_to_text_ratio",
+    # "is_html" is only the gate for the HTML checks (an email without HTML parts gets
+    # zeros from them), not a model input: legitimate training mail is almost all plain
+    # text, so baseline_v5 XGBoost put 38% of its gain on "is it HTML". html_to_text_ratio
+    # is out too: it is 0 without HTML and > 0 for all but 251 of 10,264 HTML test emails
+    # (9.3% of the gain), and is_image_only already covers "picture, almost no text".
+    "has_form_tag", "has_script_tag", "has_hidden_elements",
+    "is_image_only",
     "num_attachments", "has_executable_attachment", "has_macro_attachment",
     "has_archive_attachment", "has_double_extension_attachment",
     "urgency_keyword_count", "sensitive_info_keyword_count",
@@ -1959,6 +2484,80 @@ def extract_engineered_features(raw_text):
     except Exception:
         _extraction_stats["failed"] += 1
         raise  # Do not silently train on a fabricated all-zero vector.
+
+
+# Baseline (Doc2Vec + 10 classifiers) input: FEATURE_NAMES, then the header/link/
+# attachment/HTML groups added for detection techniques. Text-obfuscation counts and
+# BEC indicators stay out: in these corpora they mark the source, not phishing.
+BASELINE_EXTRA_FEATURES = (
+    ("_message_security", MESSAGE_SECURITY_FEATURE_NAMES), ("_link_features", LINK_FEATURE_NAMES),
+    ("_attachment_payload", ATTACHMENT_PAYLOAD_FEATURE_NAMES),
+    ("_html_features", HTML_SECURITY_FEATURE_NAMES + HTML_PAYLOAD_FEATURE_NAMES))
+BASELINE_FEATURE_NAMES = FEATURE_NAMES + [name for _, names in BASELINE_EXTRA_FEATURES for name in names]
+assert len(set(BASELINE_FEATURE_NAMES)) == len(BASELINE_FEATURE_NAMES)
+
+
+# Decisive attachment gates (verdict cascade of the Phishing Email Investigation Guide).
+# A model trained on email labels cannot learn these: almost no training email carries
+# them, so their learned weight is ~0. Each rule is a static indicator that legitimate
+# mail practically never contains; it flags the email on its own and leaves the model's
+# score unchanged. rule -> BASELINE_FEATURE_NAMES entry; fires when the value is > 0.
+# Measured 2026-10-25 on every email with an attachment (legitimate: only SpamAssassin
+# ham, 119 emails, carries attachments; Enron maildir and the CSVs have none): each rule
+# below fired on 0 of them. Not rules: has_executable_attachment (5/119 legitimate),
+# script/form and PDF active content (common in legitimate HTML/PDF files, and the model
+# has 200+ phishing examples to learn them from).
+ATTACHMENT_RULES = {
+    "disguised_executable": "attachment_disguised_executable_count",
+    "embedded_executable": "attachment_embedded_executable_count",
+    "double_extension": "has_double_extension_attachment",
+    "bidi_filename": "attachment_bidi_filename_count",
+    "vba_autoexec": "attachment_vba_autoexec_count",
+    "vba_stomping": "attachment_vba_stomping_count",
+    "xlm_macro": "attachment_xlm_macro_count",
+    "lnk_command": "attachment_lnk_command_count",
+    "html_smuggling": "attachment_html_smuggling_count",
+    "disk_image": "attachment_disk_image_count",
+    "onenote_embedded": "attachment_onenote_embedded_count",
+    "password_archive_in_body": "attachment_password_archive_in_body",
+    # Device profiles are installed through MDM, not mailed by strangers (Phishing Pot: 37).
+    "config_profile": "attachment_config_profile_count",
+    # Magika: a document/picture name or MIME type over HTML, script or binary content.
+    "disguised_active_content": "attachment_disguised_active_count",
+    # Not an attachment, but the same kind of gate: mail clients never run scripts, so a
+    # legitimate sender has no reason to obfuscate one (packer/JSFuck/aaencode/obfuscator.io,
+    # or two of: escapes, char-code arrays, string splitting, encoded blobs, decode-then-run).
+    # Measured 2026-11-02 on all 1,008 legitimate HTML emails (SpamAssassin ham, Zenodo CSVs): 0.
+    "obfuscated_script": "html_js_obfuscated",
+}
+
+
+def attachment_rule_hits(values):
+    """Names of the ATTACHMENT_RULES that fire for one email's {feature name: value}."""
+    return [rule for rule, name in ATTACHMENT_RULES.items() if values[name] > 0]
+
+
+def baseline_feature_vector(row):
+    """Ordered BASELINE_FEATURE_NAMES from a features-stage row of pipeline_cache."""
+    return [*map(float, row["_features"]),
+            *(float(row[column][name]) for column, names in BASELINE_EXTRA_FEATURES for name in names)]
+
+
+def assess_attachment_rules(raw_text):
+    """ATTACHMENT_RULES that fire for one raw email (for a web demo, next to the model score)."""
+    return attachment_rule_hits(dict(zip(BASELINE_FEATURE_NAMES, extract_baseline_features(raw_text))))
+
+
+def extract_baseline_features(raw_text):
+    """BASELINE_FEATURE_NAMES for one raw email; a web demo must use this, not FEATURE_NAMES."""
+    msg = _parse_email(raw_text)
+    _, markup = _get_email_body(msg)
+    return baseline_feature_vector({
+        "_features": extract_engineered_features(msg),
+        "_message_security": extract_message_security_features(msg),
+        "_link_features": extract_link_features(msg),
+        "_attachment_payload": extract_attachment_payload_features(msg),
+        "_html_features": extract_html_check_features(markup)})
 
 
 # --------------------------------------------------------------------------
@@ -2015,8 +2614,10 @@ def _parse_email(raw):
     if isinstance(raw, email.message.Message):
         return raw
     if isinstance(raw, bytes):
-        msg = email.message_from_bytes(raw, policy=policy.compat32)
+        msg = email.message_from_bytes(_normalize_redactions(raw), policy=policy.compat32)
     elif isinstance(raw, str):
+        if "[" in raw:
+            raw = _normalize_redactions(raw.encode("utf-8", "surrogateescape")).decode("utf-8", "surrogateescape")
         msg = email.message_from_string(raw, policy=policy.compat32)
     else:
         raise TypeError("Email must be str or bytes")
@@ -2039,12 +2640,29 @@ def _normalize(text):
 
 @lru_cache(maxsize=1)
 def _english_stopwords():
-    try:
-        words = set(stopwords.words("english"))
-    except LookupError:
-        from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
-        words = set(ENGLISH_STOP_WORDS)
-    return words - {"no", "not", "nor", "never"}
+    # Negations carry meaning ("do not click"), so they stay in the text.
+    return NLTK_ENGLISH_STOPWORDS - {"no", "not", "nor", "never"}
+
+
+# The nltk 3.10.3 "english" stopwords corpus, copied verbatim so the cleaned text is
+# unchanged after nltk was removed (unfixed CVE-2026-81726, 2026-10-26).
+NLTK_ENGLISH_STOPWORDS = frozenset((
+    "a", "about", "above", "after", "again", "against", "ain", "all", "am", "an", "and", "any", "are", "aren",
+    "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by",
+    "can", "couldn", "couldn't", "d", "did", "didn", "didn't", "do", "does", "doesn", "doesn't", "doing", "don",
+    "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn", "hadn't", "has", "hasn",
+    "hasn't", "have", "haven", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "hers",
+    "herself", "him", "himself", "his", "how", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is",
+    "isn", "isn't", "it", "it'd", "it'll", "it's", "its", "itself", "just", "ll", "m", "ma", "me", "mightn",
+    "mightn't", "more", "most", "mustn", "mustn't", "my", "myself", "needn", "needn't", "no", "nor", "not",
+    "now", "o", "of", "off", "on", "once", "only", "or", "other", "our", "ours", "ourselves", "out", "over",
+    "own", "re", "s", "same", "shan", "shan't", "she", "she'd", "she'll", "she's", "should", "should've",
+    "shouldn", "shouldn't", "so", "some", "such", "t", "than", "that", "that'll", "the", "their", "theirs",
+    "them", "themselves", "then", "there", "these", "they", "they'd", "they'll", "they're", "they've", "this",
+    "those", "through", "to", "too", "under", "until", "up", "ve", "very", "was", "wasn", "wasn't", "we",
+    "we'd", "we'll", "we're", "we've", "were", "weren", "weren't", "what", "when", "where", "which", "while",
+    "who", "whom", "why", "will", "with", "won", "won't", "wouldn", "wouldn't", "y", "you", "you'd", "you'll",
+    "you're", "you've", "your", "yours", "yourself", "yourselves"))
 
 
 def deduplicate_emails(data, report_path="label_conflicts.csv", return_audit=False):
@@ -2076,7 +2694,7 @@ def deduplicate_emails(data, report_path="label_conflicts.csv", return_audit=Fal
         # A synthetic copy of a Nazario email yields to the original; it outranks
         # spam copies so the label-scope step does not discard it with them.
         data = data.assign(_label_rank=data.LabelKind.map(
-            {"legitimate": 0, "phishing": 0, "malicious_synthetic": 1, "spam": 2,
+            {"legitimate": 0, "phishing": 0, "malspam": 0, "malicious_synthetic": 1, "spam": 2,
              "positive_unspecified": 3}).fillna(4))
         data = data.sort_values("_label_rank", kind="stable").drop(columns="_label_rank")
     else:
@@ -2105,6 +2723,11 @@ def _simhash(text):
     return sum(1 << bit for bit, count in enumerate(counts) if 2 * count >= len(values))
 
 
+def group_signature(body, exact):
+    """(body hash, SimHash or None) that group_email_variants compares; exact is the dedup key."""
+    return hashlib.sha256((body or exact).encode()).hexdigest(), _simhash(body)
+
+
 def group_email_variants(data, group_attachments=False):
     """Keep near duplicates, but put a whole SimHash group in one split.
 
@@ -2123,8 +2746,10 @@ def group_email_variants(data, group_attachments=False):
             parent[max(a, b)] = min(a, b)
     bodies, hashes, bands = {}, {}, defaultdict(set)
     attachment_owners = {}
-    prepared_bodies = data['_group_body'] if '_group_body' in data else [None] * len(data)
-    for i, (raw, exact, body) in enumerate(zip(data.Text, data._dedup_key, prepared_bodies)):
+    # The identity stage stores only (body hash, SimHash), not the body text: ~800k bodies
+    # did not fit the sandbox memory limit.
+    prepared = zip(data['_group_key'], data['_simhash']) if '_group_key' in data else None
+    for i, (raw, exact) in enumerate(zip(data.Text, data._dedup_key)):
         if group_attachments:
             digests = data['_attachment_hashes'].iloc[i] if '_attachment_hashes' in data else []
             for digest in digests:
@@ -2132,16 +2757,19 @@ def group_email_variants(data, group_attachments=False):
                     union(i, attachment_owners[digest])
                 else:
                     attachment_owners[digest] = i
-        if body is None:
+        if prepared is not None:
+            body_key, fingerprint = next(prepared)
+            # pandas may hold missing fingerprints as None or NaN and present ones as numpy ints.
+            fingerprint = None if fingerprint is None or fingerprint != fingerprint else int(fingerprint)
+        else:
             msg = _parse_email(raw)
             plain, markup = _get_email_body(msg)
             body = _normalize("\n".join(dict.fromkeys(p for p in (plain, _strip_html(markup)) if p.strip())))
-        body_key = hashlib.sha256((body or exact).encode()).hexdigest()
+            body_key, fingerprint = group_signature(body, exact)
         if body_key in bodies:
             union(i, bodies[body_key])
             continue
         bodies[body_key] = i
-        fingerprint = _simhash(body)
         if fingerprint is None:
             continue
         if fingerprint in hashes:
@@ -2199,97 +2827,6 @@ def split_train_validation_test(data, validation_size=0.2, test_size=0.2, seed=4
     return train, validation, test
 
 
-def prepare_semantic_text(raw):
-    """Decoded subject/body for BERT; preserve sentences, negation and word order."""
-    # Visible text after deobfuscation: hidden "salting" text never reaches BERT.
-    text = _deobfuscated_message_text(_parse_email(raw))[0]
-    return unicodedata.normalize("NFC", text.replace("\x00", " ")).strip() or "[empty email]"
-
-
-class BertEmailClassifier:
-    """Fine-tuned BERT inference with all overlapping windows, aggregated per email.
-
-    predict_proba accepts decoded semantic strings. predict_emails accepts raw MIME.
-    No attachment bytes are sent to the language model.
-    """
-    def __init__(self, model, tokenizer, device=None, max_length=256, stride=64, batch_size=4):
-        import torch
-        self.model, self.tokenizer = model, tokenizer
-        self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        self.max_length, self.stride, self.batch_size = max_length, stride, batch_size
-        if not 4 <= max_length <= model.config.max_position_embeddings:
-            raise ValueError("BERT window length exceeds checkpoint configuration")
-        if not 0 <= stride < max_length - tokenizer.num_special_tokens_to_add(pair=False):
-            raise ValueError("BERT stride must be smaller than window content length")
-        if batch_size < 1:
-            raise ValueError("BERT batch_size must be positive")
-        self.model.to(self.device)
-        self.classes_ = [0, 1]
-        self.decision_threshold_ = float(getattr(model.config, "email_threshold", 0.5))
-
-    @classmethod
-    def from_pretrained(cls, checkpoint, device=None, batch_size=4, max_length=None, stride=None):
-        from transformers import BertForSequenceClassification, BertTokenizerFast
-        tokenizer = BertTokenizerFast.from_pretrained(str(checkpoint))
-        model = BertForSequenceClassification.from_pretrained(
-            str(checkpoint), num_labels=2, use_safetensors=True)
-        return cls(model, tokenizer, device,
-                   max_length or getattr(model.config, "email_max_length", 256),
-                   stride if stride is not None else getattr(model.config, "email_stride", 64),
-                   batch_size)
-
-    def encode_windows(self, text):
-        # Let the fast tokenizer emit overflow windows; never truncate to the first window.
-        encoded = self.tokenizer(
-            str(text), truncation=True, max_length=self.max_length, stride=self.stride,
-            return_overflowing_tokens=True, padding=False, return_attention_mask=True)
-        return [{key: values[i] for key, values in encoded.items()
-                 if key in {"input_ids", "attention_mask", "token_type_ids"}}
-                for i in range(len(encoded["input_ids"]))]
-
-    def predict_proba(self, texts):
-        import numpy as np
-        import torch
-        self.model.eval()
-        scores = np.zeros(len(texts), dtype=np.float32)
-        pending, owners = [], []
-        def flush():
-            if not pending:
-                return
-            tensors = self.tokenizer.pad(pending, padding=True, return_tensors="pt")
-            tensors = {key: value.to(self.device) for key, value in tensors.items()}
-            with torch.inference_mode():
-                probabilities = self.model(**tensors).logits.float().softmax(-1)[:, 1].cpu().numpy()
-            for owner, probability in zip(owners, probabilities):
-                scores[owner] = max(scores[owner], float(probability))
-            pending.clear()
-            owners.clear()
-        for i, text in enumerate(texts):
-            for window in self.encode_windows(text):
-                pending.append(window)
-                owners.append(i)
-                if len(pending) >= self.batch_size:
-                    flush()
-            if (i + 1) % 5000 == 0:
-                print(f'BERT inferred {i + 1}/{len(texts)} emails', flush=True)
-        flush()
-        return np.column_stack([1.0 - scores, scores])
-
-    def predict_emails(self, raw_messages):
-        return self.predict_proba([prepare_semantic_text(raw) for raw in raw_messages])
-
-    def save_pretrained(self, directory):
-        self.model.config.email_max_length = self.max_length
-        self.model.config.email_stride = self.stride
-        self.model.config.email_aggregation = "max_window_probability"
-        self.model.config.email_threshold = self.decision_threshold_
-        positive = getattr(self.model.config, "email_positive_label", "phishing")
-        self.model.config.id2label = {0: "legitimate", 1: positive}
-        self.model.config.label2id = {"legitimate": 0, positive: 1}
-        self.model.save_pretrained(str(directory), safe_serialization=True)
-        self.tokenizer.save_pretrained(str(directory))
-
-
 def inspect_email_file(path):
     """Convenience entry point for checking a local .eml without executing files."""
     from pathlib import Path
@@ -2300,21 +2837,8 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Static attachment indicators; not a malware-free certificate")
     parser.add_argument("email_file", help="Path to a raw .eml email")
-    parser.add_argument("--bert-checkpoint", help="Local fine-tuned BERT directory (optional)")
     args = parser.parse_args()
     from pathlib import Path
     raw = Path(args.email_file).read_bytes()
-    result = {"attachments": inspect_email_attachments(raw)}
-    if args.bert_checkpoint:
-        checkpoint = Path(args.bert_checkpoint)
-        if not checkpoint.is_dir():
-            parser.error("--bert-checkpoint must be a local fine-tuned model directory")
-        classifier = BertEmailClassifier.from_pretrained(checkpoint)
-        if not hasattr(classifier.model.config, "email_threshold"):
-            parser.error("Checkpoint has no validation-selected email threshold; train it first")
-        score = float(classifier.predict_emails([raw])[0, 1])
-        result["semantic"] = {
-            "positive_score": score, "threshold": classifier.decision_threshold_,
-            "label": classifier.model.config.id2label[int(score >= classifier.decision_threshold_)],
-            "attachment_malware_verdict": "not_assessed_by_BERT"}
+    result = {"attachments": inspect_email_attachments(raw), "attachment_rules": assess_attachment_rules(raw)}
     print(json.dumps(result, ensure_ascii=True, indent=2))

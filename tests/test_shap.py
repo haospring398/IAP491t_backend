@@ -27,7 +27,7 @@ class ShapTests(unittest.TestCase):
                       "Logistic Regression": [LogisticRegression(max_iter=500)]}
         with patch.object(train, "BASE_DIR", root), contextlib.redirect_stdout(io.StringIO()):
             train.training(data=training_frame(80), output_dir=cls.run_dir, candidates=candidates,
-                           epochs=2, train_bert=False, run_ablation=False)
+                           epochs=2, run_ablation=False)
 
     @classmethod
     def tearDownClass(cls):

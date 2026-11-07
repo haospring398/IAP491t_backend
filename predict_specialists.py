@@ -8,7 +8,7 @@ import numpy as np
 
 from evaluate import file_digest, positive_scores
 from pipeline_cache import _process, preprocessing_signature
-from preprocess import inspect_email_attachments, BertEmailClassifier
+from preprocess import inspect_email_attachments
 from specialists import availability, feature_dict
 
 
@@ -29,11 +29,8 @@ class EmailSpecialists:
         self.models = {}
         for name, config in self.manifest['branches'].items():
             if config['status'] == 'trained':
-                if name == 'text':
-                    self.models[name] = BertEmailClassifier.from_pretrained(self.directory / config['directory'])
-                else:
-                    with (self.directory / config['file']).open('rb') as handle:
-                        self.models[name] = pickle.load(handle)
+                with (self.directory / config['file']).open('rb') as handle:
+                    self.models[name] = pickle.load(handle)
 
     def assess(self, raw):
         identity = _process((raw, 'identity', False))
@@ -54,8 +51,7 @@ class EmailSpecialists:
             elif config['status'] != 'trained':
                 entry.update(status=config['status'], reason=config.get('reason', ''))
             else:
-                inputs = [row['_semantic_text']] if name == 'text' else np.asarray(
-                    [[values[n] for n in config['features']]], dtype=np.float32)
+                inputs = np.asarray([[values[n] for n in config['features']]], dtype=np.float32)
                 score = float(positive_scores(self.models[name], inputs)[0])
                 entry.update(status='assessed', score=score, threshold=config['threshold'],
                              validation_precision_target_met=config['precision_target_met'],
