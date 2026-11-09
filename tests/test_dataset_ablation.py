@@ -5,7 +5,10 @@ import shutil
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -100,6 +103,7 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual({s for s, g in groups.items() if g == 'nazario'},
                          {s for s in REAL_SOURCES if s.startswith(('phishing-', 'phishing0', 'phishing1', 'phishing2',
                                                                    'phishing3', 'private-', '20051114'))})
+        self.assertEqual(ablation.dataset_group('TREC_07.csv'), 'trec')
         with self.assertRaisesRegex(ValueError, 'mystery.csv'):
             ablation.dataset_group('mystery.csv')
         with self.assertRaisesRegex(ValueError, 'contradicts'):
@@ -128,6 +132,10 @@ class GroupingTests(unittest.TestCase):
         pairs = ablation.overlap_report({'train': triple, 'validation': empty, 'test': empty})
         pairs = pairs[pairs.split == 'train'].set_index(['group_a', 'group_b']).mixed_label_clusters.to_dict()
         self.assertEqual(pairs, {('epvme', 'nazario'): 0, ('epvme', 'enron'): 1, ('enron', 'nazario'): 1})
+        both = ablation.overlap_report({'train': triple, 'validation': empty, 'test': empty})
+        both = both[both.split == 'train'].set_index(['group_a', 'group_b']).clusters_with_both_labels.to_dict()
+        self.assertEqual(both, {('epvme', 'nazario'): 1, ('epvme', 'enron'): 1, ('enron', 'nazario'): 1})
+        self.assertEqual(train.loc[('epvme', 'nazario'), 'clusters_with_both_labels'], 0)
 
 
 class ExperimentTests(unittest.TestCase):
@@ -140,6 +148,7 @@ class ExperimentTests(unittest.TestCase):
         cls.metadata, cls.manifest = ablation.load_metadata(cls.features)
         cls.frames, _ = load_exported_features(cls.features)
         cls.digest = ablation.file_sha256(cls.features / 'features_manifest.json')
+        ablation.claim_output(cls.output, cls.features, cls.digest)  # như CLI: thư mục có marker
         for name in ('reference', 'reference_seed43', 'without_epvme', 'without_ling', 'without_enron_trec', 'only_malspam',
                      'random_like_nazario'):
             state = cls.run_named(name)
@@ -199,6 +208,9 @@ class ExperimentTests(unittest.TestCase):
         train = self.metadata['train']
         # Cụm template 5 dòng EPVME (> 5% của 40) bị loại và không bao giờ được bốc; cụm lẫn nhãn cũng vậy.
         self.assertEqual(details['train']['excluded_large_clusters'], [{'group': 'epvme', 'size': 5}])
+        # EPVME train: 1 dòng cụm lẫn nhãn, 1 dòng cụm chung với Nazario, 5 dòng cụm template.
+        self.assertEqual(details['train']['groups']['epvme']['undrawable_rows'], 7)
+        self.assertEqual(details['train']['groups']['nazario']['undrawable_rows'], 1)
         sizes = train.groupby('_group').size()
         self.assertFalse(masks['train'][train._group.isin(sizes[sizes > 2].index)].any())
         mixed = train.groupby('_group').Class.nunique()
@@ -324,8 +336,10 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual((stored['status'], stored['python_hash_seed'], stored['doc2vec_epochs']), ('complete', '0', 2))
         self.assertEqual(len(stored['models']), 9)  # build_candidates mặc định: đủ 9 classifier
         self.assertIn('sklearn', stored['environment'])
-        self.assertRegex(stored['environment']['git_commit'], r'^[0-9a-f]{40}$')  # kết quả gắn với commit
-        self.assertIsInstance(stored['environment']['git_code_dirty'], bool)
+        if stored['environment']['git_commit'] is not None:  # không có git thì ghi None
+            self.assertRegex(stored['environment']['git_commit'], r'^[0-9a-f]{40}$')  # kết quả gắn với commit
+        self.assertIn(stored['environment']['git_code_dirty'], (True, False, None))
+        self.assertEqual(stored['code_changed_during_run'], [])
         self.assertTrue((target / 'summary_overall.csv').exists())
 
     def test_cli_overlap_writes_report_and_empty_summary_fails_clearly(self):
@@ -365,7 +379,8 @@ class ExperimentTests(unittest.TestCase):
             self.assertTrue((self.output / name).exists(), name)
         overall = pd.read_csv(self.output / 'summary_overall.csv')
         reference = overall[overall.Experiment == 'reference']
-        self.assertTrue(np.allclose(reference.delta_Recall, 0))
+        self.assertTrue(reference.delta_Recall.isna().all())
+        self.assertTrue(overall[overall.Experiment != 'reference'].delta_Recall.notna().all())
         lr = overall[(overall.Model == 'Logistic Regression') & (overall.Scope == 'all')].set_index('Experiment')
         self.assertAlmostEqual(lr.loc['without_epvme', 'delta_Recall'],
                                lr.loc['without_epvme', 'Recall'] - lr.loc['reference', 'Recall'])
@@ -386,10 +401,128 @@ class ExperimentTests(unittest.TestCase):
         reference_selected = groups[(groups.Experiment == 'reference') & groups['Selected-on-validation']
                                     & (groups.Group == selected.Group)].iloc[0]
         self.assertAlmostEqual(selected.delta_vs_reference_selected_Rate, selected.Rate - reference_selected.Rate)
+        own = groups[groups.Experiment == 'reference']
+        self.assertTrue(own.delta_Rate.isna().all() and own.delta_vs_reference_selected_Rate.isna().all())
         spread = pd.read_csv(self.output / 'seed_spread.csv')
         self.assertEqual(set(spread['count']), {2})
         self.assertIn('malspam', set(spread.Subset))  # theo nhóm, không chỉ tổng thể
         self.assertIn('all', set(spread.Subset))
+
+    def environment_zero(self):
+        return mock.patch.dict('os.environ', {'PYTHONHASHSEED': '0'})
+
+    def test_failed_experiments_are_listed_before_the_summary_and_exit_one(self):
+        def fake(name, *args, **kwargs):
+            if name == 'without_malspam':
+                raise MemoryError('simulated')
+            return 'complete'
+        output = StringIO()
+        with self.environment_zero(), mock.patch.object(ablation, 'run_experiment', side_effect=fake), \
+                redirect_stdout(output):
+            code = ablation.main(['--features', str(self.features), '--output', str(self.output),
+                                  '--experiments', 'reference', 'without_malspam'])
+        text = output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertLess(text.index('Failed experiments: without_malspam'), text.index('Summary written'))
+
+    def test_definition_mismatch_stops_the_whole_queue(self):
+        calls = []
+
+        def fake(name, *args, **kwargs):
+            calls.append(name)
+            raise ablation.DefinitionMismatch('different definition')
+        with self.environment_zero(), mock.patch.object(ablation, 'run_experiment', side_effect=fake), \
+                redirect_stdout(StringIO()):
+            with self.assertRaises(ablation.DefinitionMismatch):
+                ablation.main(['--features', str(self.features), '--output', str(self.output),
+                               '--experiments', 'without_malspam', 'without_ceas'])
+        self.assertEqual(calls, ['without_malspam'])
+
+    def test_summarize_cli(self):
+        with self.environment_zero(), redirect_stdout(StringIO()) as output:
+            self.assertEqual(ablation.main(['--features', str(self.features), '--output', str(self.output),
+                                            '--summarize']), 0)
+        self.assertIn('summary_overall.csv', output.getvalue())
+
+    def test_recheck_after_lock_never_overwrites_a_result(self):
+        folder = self.output / 'without_ceas'
+        # Tiến trình khác xong đúng lúc giữa lần kiểm tra đầu và lúc lấy lock: bỏ qua, nhả lock, không ghi gì.
+        with mock.patch.object(ablation, 'experiment_state', side_effect=['pending', 'complete']):
+            self.assertEqual(self.run_named('without_ceas'), 'complete')
+        self.assertFalse((folder / 'lock').exists())
+        self.assertFalse((folder / 'experiment.json').exists())
+        # Kết quả của tiến trình kia khác định nghĩa: báo lỗi, giữ nguyên file của nó, không ghi "failed".
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'experiment.json').write_text('{"status": "complete"}', encoding='utf-8')
+        with mock.patch.object(ablation, 'experiment_state',
+                               side_effect=['pending', ablation.DefinitionMismatch('different')]):
+            with self.assertRaises(ablation.DefinitionMismatch):
+                self.run_named('without_ceas')
+        self.assertEqual((folder / 'experiment.json').read_text(encoding='utf-8'), '{"status": "complete"}')
+        self.assertFalse((folder / 'lock').exists())
+        shutil.rmtree(folder)
+
+    def test_code_edited_after_the_process_started_is_refused(self):
+        folder = self.output / 'without_spamassassin'
+        with mock.patch.dict(ablation._LOADED_CODE, {'train.py': '0' * 64}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, 'changed after this process started'):
+                self.run_named('without_spamassassin')
+        self.assertEqual(self.stored('without_spamassassin')['status'], 'failed')
+        self.assertFalse((folder / 'lock').exists())
+        shutil.rmtree(folder)
+
+    def test_output_inside_an_export_or_another_run_is_refused(self):
+        with self.assertRaisesRegex(RuntimeError, 'inside the --features folder'):
+            ablation.claim_output(self.features / 'ablation', self.features, self.digest)
+        with self.assertRaisesRegex(RuntimeError, 'inside another run or ablation folder'):
+            ablation.claim_output(self.output / 'nested', self.features, self.digest)
+        run = self.root / 'some_run'
+        run.mkdir()
+        (run / 'manifest.json').write_text('{}')
+        with self.assertRaisesRegex(RuntimeError, 'inside another run or ablation folder'):
+            ablation.claim_output(run / 'ablation', self.features, self.digest)
+        claimed = self.root / 'claimed_marker'
+        ablation.claim_output(claimed, self.features, self.digest)
+        self.assertNotIn('definition_version', json.loads((claimed / ablation.MARKER).read_text(encoding='utf-8')))
+
+
+class StratificationTests(unittest.TestCase):
+    def test_stratum_targets_use_largest_remainder(self):
+        frame = pd.DataFrame({'Group': ['nazario'] * 5 + ['phishing_pot'] * 3 + ['epvme'] * 2 + ['enron'] * 4,
+                              'Class': [1] * 10 + [0] * 4})
+        # 7 × (5, 3, 2) / 10 = 3.5, 2.1, 1.4 -> sàn 3, 2, 1; phần dư 1 về phần lẻ lớn nhất (Nazario).
+        self.assertEqual(ablation._stratum_targets(frame, 7), {'nazario': 4, 'phishing_pot': 2, 'epvme': 1})
+
+    def test_total_tolerance_is_enforced_and_parameters_come_from_the_caller(self):
+        # Mỗi nhóm chỉ bốc được cụm 49 dòng (dòng còn lại nằm trong cụm lẫn nhãn): từng nhóm -2% hợp lệ,
+        # nhưng tổng 98/100 lệch quá ±1%.
+        frame = pd.DataFrame({'_group': [1] * 49 + [2, 2] + [3] * 49 + [4, 4],
+                              'Class': [1] * 49 + [1, 0] + [1] * 49 + [1, 0],
+                              'Group': ['nazario'] * 49 + ['nazario', 'enron'] + ['epvme'] * 49 + ['epvme', 'enron']})
+        with self.assertRaisesRegex(ValueError, 'not within ±1% of 100'):
+            ablation.stratified_cluster_mask(frame, 100, np.random.default_rng(0), max_cluster_share=1.0)
+        with self.assertRaisesRegex(ValueError, '±2%'):  # mặc định 5%: cụm 49 dòng quá lớn để bốc
+            ablation.stratified_cluster_mask(frame, 100, np.random.default_rng(0))
+        mask, details = ablation.stratified_cluster_mask(frame, 100, np.random.default_rng(0),
+                                                         max_cluster_share=1.0, total_tolerance=0.02)
+        self.assertEqual((int(mask.sum()), details['groups']['nazario']['undrawable_rows']), (98, 1))
+
+    def test_stratum_ceiling_keeps_the_total_within_tolerance(self):
+        # Cụm 1-3 dòng: nhóm đầu có thể vượt chỉ tiêu 1 dòng; nhóm sau phải bù để tổng không vượt ±1%.
+        rng = np.random.default_rng(7)
+        rows = []
+        for group in ('nazario', 'phishing_pot'):
+            size_left, key = 100, len(rows)
+            while size_left:
+                size = int(min(size_left, rng.integers(1, 4)))
+                rows += [{'_group': f'{group}{key}', 'Class': 1, 'Group': group}] * size
+                size_left -= size
+                key += 1
+        frame = pd.DataFrame(rows)
+        for seed in range(200):
+            mask, details = ablation.stratified_cluster_mask(frame, 100, np.random.default_rng(seed),
+                                                             max_cluster_share=1.0)
+            self.assertLessEqual(abs(int(mask.sum()) - 100), 1, seed)
 
 
 if __name__ == '__main__':

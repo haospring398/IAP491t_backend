@@ -238,6 +238,19 @@ It reuses the verified export `runs/2026-11-08_features_v6` and the `train.py` c
     - `tests.test_dataset_ablation`: 14 tests OK.
     - Root suite: 63 tests, OK, 1 skipped.
     - No second review pass was run on this renegotiation.
+- **`reference` run, 2026-11-09 (commit 17c24d3, clean):**
+  - `complete` in 4.78 h (Doc2Vec and inference 1.58 h); peak RAM 3.93 GB; run with the root `.venv` (Python 3.11.2, same package versions as `.venv311`; the ablation reads the extracted export and parses no email).
+  - All 9 models have `threshold_constraint_met: true`. MLP is selected, as in `runs/2026-11-08_baseline_v6_local`. On the same 78,398 test rows the metrics agree to within 0.005 for every model except AdaBoost (F2 0.690 → 0.632, the weakest model in both runs).
+  - `export_digest` 18bac4f1…, `test_record_ids_sha256` 7fcf35c2…, `test_scores_sha256` 501c57fc….
+  - `--summarize` with `reference` alone works. Its own deltas were 0.0 instead of blank; fixed (summary only): `reference` rows now have empty `delta_*` and `delta_vs_reference_selected_Rate`.
+  - `TREC_07.csv` has 0 rows in all three splits of the export (`load_data.py` excludes it while raw trec07p is present), so the extra group-table entry changes nothing here. It is kept for exports without raw trec07p and documented in the README.
+- **Pass-2 patches applied after `reference` completed:**
+  - Applied as triaged above, plus a process-start code snapshot (`loaded_code`): an experiment whose code files differ from it is refused, and `code_changed_during_run` lists files edited while it ran.
+  - **Effect on `reference`:** the `reference` definition record is unchanged, and `experiment_state` still returns `complete` for it under the new code. In the `reference` path, the diff only moves the post-lock re-check, takes the environment snapshot at the start, and asserts the Doc2Vec epochs. Row selection for `reference`, `vectorize`, tuning and scoring are untouched. `reference` therefore remains a valid baseline for later experiments.
+  - **Changed record:** only `random_like_nazario`'s, which now carries `total_tolerance` and `group_tolerance`. Its real draw is unchanged: train 6,097 rows / 4,858 clusters; validation 2,035 rows.
+  - **Undrawable rows** (train): nazario 1,854, epvme 7,334 (including the 6,011-row cluster), phishing_pot 1, malspam 1.
+  - **Overlap report:** regenerated with `clusters_with_both_labels`. 1 of the 1,325 `epvme`×`nazario` clusters holds both labels.
+  - **Verification:** `tests.test_dataset_ablation`: 23 tests OK; root suite 72 tests, OK, 1 skipped.
 
 ## Spec Change Log
 
@@ -281,6 +294,32 @@ Pass 1 (Blind Hunter = B, Edge Case Hunter = E, Verification Gap = V). Routes: p
 | B17 | Parallel processes overwrite summary files | low | Real but benign: last writer wins. Patch README: rerun `--summarize` at the end. |
 | B18 | `TREC_07.csv` is missing from the group table | low | Real for exports without raw trec07p. Patch: map to `trec`. |
 | B19 | Missing test branches | medium | Same as V2–V4, plus `without_<legit>`. Patch: `without_ling` added to setUp; FPR `held_out` asserted. |
+
+Pass 2 (review of pass-1 patches and the 2026-11-09 renegotiation; B2 = Blind, E2 = Edge, V2 = Verification). Code is frozen while `reference` runs (commit 17c24d3), so every patch below is applied after it completes. No patch may change the `reference` definition record, and `DEFINITION_VERSION` stays 2.
+
+| # | Finding | Verdict | Evidence / route |
+|---|---|---|---|
+| B2-3/E2-4/E2-5 | Code hashes, git state and library versions are read when the experiment finishes, not when the code was loaded; a non-OSError there marks a finished run `failed` | medium | Real: `environment_record()` is called in the final `save_json`. Patch: snapshot it before training (in `main` and at experiment start), and `git_state` catches every exception. `reference` is unaffected as long as no code file changes before it finishes. |
+| B2-2/E2-3/V2-o1 | The post-lock re-check sits inside the failure handler; a mismatch race overwrites another process's complete record with `failed` | medium | Real. Patch: re-check before the handler; never write `failed` over a complete record. |
+| B2-1/E2-9 | A definition mismatch is counted as a failed experiment and the queue continues; the message points at a stale `experiment.json` | medium | Real. Patch: a `DefinitionMismatch` error that aborts the run with its own message. |
+| E2-8 | `summarize` raising after a long queue hides the failed list | low | Real, direct fix. Patch: print the failed list before summarizing. |
+| B2-5/E2-1 | Per-group +2% overshoots can add up past the 1% total, which then fails deterministically | medium | Verified by the reviewer: seed 56 reaches +0.67%. Patch: each stratum's ceiling also respects the remaining total slack. `random_like` has not run yet. |
+| B2-4/E2-10 | `stratified`/`max_cluster_share` keys are decorative; tolerances are not in the definition | low | Real. Patch: `random_like` reads `max_cluster_share`, `group_tolerance` and `total_tolerance` from its own definition entry, and messages format the real values. This changes only `random_like`'s record. |
+| B2-6 | Multi-group pure clusters (784 train, 271 validation) count toward strata but are never drawn, so Nazario rows shared with EPVME are removed by `without_nazario` but never by the control | medium | Real design consequence. Patch: record undrawable rows per group (large and multi-group) in `random_control`, and state it in the README. |
+| B2-7 | The per-pair `mixed_label_clusters` column now only restates the pair type | low | Real. Patch: add a cluster-level `clusters_with_both_labels` column. |
+| B2-8/V2-o2 | `ablation.json` records a stale `definition_version`; `--list` trusts every `experiment.json` | low | Marker version: patch (the marker stores only the export digest). `--list` stale marking: rejected (resume already refuses mismatches loudly). |
+| E2-2 | `--list` crashes if a stratum is infeasible | low | Feasible on the real export. Rejected (same as pass-1 E10). |
+| E2-6 | `--output` may be a new subfolder inside `--features` or an existing run | medium | Real against the policy. Patch: refuse outputs inside the export or under a folder that holds a run or export manifest. |
+| E2-7 | `--output` is a file, or the marker holds corrupt JSON | low | Fails loudly with a Python error. Rejected. |
+| E2-11 | A direct `run_experiment(epochs=0)` call | low | The CLI already validates it. Rejected. |
+| E2-13 | Recorded epochs are the requested ones, not what `vectorize` used | low | Direct fix. Patch: assert `settings['epochs'] == epochs`. |
+| B2-10 | `--summarize` needs the export for the breakdowns | low | The export is kept by policy. Rejected. |
+| B2-9/V2-4 | `TREC_07.csv` mapping is untested and missing from the spec's group list | low | Patch: add a test. The frozen grouping text is not edited (it is a compatible extension, noted here). |
+| B2-11/E2-12/V2-o3 | The git assertions fail in copies without git | low | Patch: accept `None`. |
+| V2-1/B2-11 | The `main` path that continues after a failure and exits 1 is untested | medium | Pre-verified. Patch: a mocked `run_experiment` test. |
+| V2-3/B2-11 | The `--summarize` CLI path is untested | medium | Pre-verified. Patch: CLI test for the marker refusal and the breakdown CSVs. |
+| V2-2 | The post-lock re-check is untested | low | Filed as defer, but cheap with a mock. Patch. |
+| B2-11 | `_stratum_targets` remainder and the total-tolerance error are untested | low | Patch: two small tests. |
 
 ## Design Notes
 

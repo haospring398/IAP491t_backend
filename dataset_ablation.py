@@ -60,11 +60,16 @@ def _experiments():
     items += [('without_enron_trec', {'kind': 'without', 'groups': ['enron', 'trec'], 'seed': 42})]
     items += [(f'only_{g}', {'kind': 'only', 'group': g, 'seed': 42}) for g in POSITIVE_GROUPS]
     items += [('random_like_nazario', {'kind': 'random_like', 'group': 'nazario', 'seed': 42, 'sample_seed': 42,
-                                       'stratified': True, 'max_cluster_share': MAX_CLUSTER_SHARE})]
+                                       'stratified': True, 'max_cluster_share': MAX_CLUSTER_SHARE,
+                                       'total_tolerance': RANDOM_TOLERANCE, 'group_tolerance': GROUP_TOLERANCE})]
     return dict(items)
 
 
 EXPERIMENTS = _experiments()
+
+
+class DefinitionMismatch(RuntimeError):
+    """Thư mục output đã có thí nghiệm xong với định nghĩa khác: dừng cả hàng đợi, không chạy tiếp."""
 
 
 def dataset_group(source):
@@ -128,27 +133,31 @@ def _stratum_targets(frame, target):
     return {g: int(v) for g, v in targets.items()}
 
 
-def stratified_cluster_mask(frame, target, rng):
+def stratified_cluster_mask(frame, target, rng, max_cluster_share=MAX_CLUSTER_SHARE,
+                            total_tolerance=RANDOM_TOLERANCE, group_tolerance=GROUP_TOLERANCE):
     """Bỏ trọn các cụm _group thuần dương và thuộc một nhóm, bốc ngẫu nhiên theo từng nhóm dương.
-    Cụm lẫn nhãn (bỏ phần dương sẽ tách đôi cụm), cụm vắt nhiều nhóm và cụm lớn hơn 5% target
-    không được bốc. Trả về (mask, chi tiết để ghi vào experiment.json)."""
+    Cụm lẫn nhãn (bỏ phần dương sẽ tách đôi cụm), cụm vắt nhiều nhóm và cụm lớn hơn
+    max_cluster_share × target không được bốc. Trả về (mask, chi tiết để ghi vào experiment.json)."""
     details = {'target': int(target), 'groups': {}, 'excluded_large_clusters': [], 'multi_group_clusters': 0}
     if target == 0:
         return np.zeros(len(frame), dtype=bool), details
     clusters = frame.groupby('_group').agg(size=('Class', 'size'), low=('Class', 'min'),
                                            groups=('Group', 'nunique'), group=('Group', 'first'))
     pure = clusters[clusters.low == 1]
-    limit = MAX_CLUSTER_SHARE * target
+    limit = max_cluster_share * target
     large = pure[pure['size'] > limit].sort_values('size', ascending=False)
     details['excluded_large_clusters'] = [
         {'group': '+'.join(sorted(set(frame.Group[frame._group == key]))), 'size': int(size)}
         for key, size in large['size'].items()]
     details['multi_group_clusters'] = int(((pure['size'] <= limit) & (pure.groups > 1)).sum())
     eligible = pure[(pure['size'] <= limit) & (pure.groups == 1)]
-    chosen, total = [], 0
+    positives = frame.Group[frame.Class == 1].value_counts()
+    chosen, total, goals_done = [], 0, 0
     for group, goal in _stratum_targets(frame, target).items():
         pool = eligible[eligible.group == group]
-        low, high = goal * (1 - GROUP_TOLERANCE), goal * (1 + GROUP_TOLERANCE)
+        # Trần của tầng: ±group_tolerance của tầng, và không vượt phần dư tổng còn lại (±total_tolerance).
+        low = goal * (1 - group_tolerance)
+        high = min(goal * (1 + group_tolerance), goal + target * total_tolerance - (total - goals_done))
         picked, removed = [], 0
         for index in rng.permutation(len(pool)):
             if removed >= goal:  # nhắm đúng chỉ tiêu; ±2% chỉ là giới hạn chấp nhận
@@ -159,12 +168,17 @@ def stratified_cluster_mask(frame, target, rng):
             picked.append(pool.index[index])
             removed += size
         if removed < low:
-            raise ValueError(f'Cannot remove {goal} {group} rows within ±2% using eligible whole clusters')
-        details['groups'][group] = {'target': goal, 'removed_rows': removed, 'removed_clusters': len(picked)}
+            raise ValueError(f'Cannot remove {goal} {group} rows within ±{group_tolerance:.0%} '
+                             'using eligible whole clusters')
+        # Dòng dương của nhóm nằm trong cụm không được bốc (lẫn nhãn, vắt nhóm, quá lớn): đối chứng
+        # không bao giờ bỏ chúng, còn without_<group> thì có.
+        details['groups'][group] = {'target': goal, 'removed_rows': removed, 'removed_clusters': len(picked),
+                                    'undrawable_rows': int(positives[group] - pool['size'].sum())}
         chosen += picked
         total += removed
-    if abs(total - target) > target * RANDOM_TOLERANCE:
-        raise ValueError(f'Stratified removal of {total} rows is not within ±1% of {target}')
+        goals_done += goal
+    if abs(total - target) > target * total_tolerance:
+        raise ValueError(f'Stratified removal of {total} rows is not within ±{total_tolerance:.0%} of {target}')
     details.update({'removed_rows': total, 'removed_clusters': len(chosen)})
     return frame._group.isin(set(chosen)).to_numpy(), details
 
@@ -185,7 +199,11 @@ def removal_masks(metadata, definition, details=None):
         elif kind == 'random_like':
             group = definition['group']
             rng = np.random.default_rng(definition['sample_seed'] + index)
-            masks[split], drawn = stratified_cluster_mask(frame, int((frame.Group == group).sum()), rng)
+            masks[split], drawn = stratified_cluster_mask(
+                frame, int((frame.Group == group).sum()), rng,
+                max_cluster_share=definition.get('max_cluster_share', MAX_CLUSTER_SHARE),
+                total_tolerance=definition.get('total_tolerance', RANDOM_TOLERANCE),
+                group_tolerance=definition.get('group_tolerance', GROUP_TOLERANCE))
             # Số cụm mà without_<group> bỏ: cùng số dòng nhưng có thể ít cụm (ít đa dạng) hơn nhiều.
             drawn[f'without_{group}_clusters'] = int(frame._group[frame.Group == group].nunique())
             if details is not None:
@@ -286,6 +304,15 @@ def environment_record():
 
 
 CODE_FILES = ('dataset_ablation.py', 'train.py', 'evaluate.py', 'preprocess.py', 'pipeline_cache.py', 'load_data.py')
+_LOADED_CODE = {}
+
+
+def loaded_code():
+    """Hash code lúc tiến trình bắt đầu (main gọi trước hàng đợi). Một hàng đợi dài chạy code đã nạp,
+    nên mọi thí nghiệm của nó được so với mốc này, không phải với file trên đĩa lúc thí nghiệm bắt đầu."""
+    if not _LOADED_CODE:
+        _LOADED_CODE.update({name: file_sha256(BASE_DIR / name) for name in CODE_FILES})
+    return dict(_LOADED_CODE)
 
 
 def git_state():
@@ -297,7 +324,7 @@ def git_state():
     try:
         commit = git('rev-parse', 'HEAD')
         changed = git('status', '--porcelain', '--', *CODE_FILES)
-    except OSError:
+    except Exception:  # không có git, git treo hay lỗi giải mã: chỉ mất thông tin, không làm hỏng thí nghiệm
         commit = changed = None
     return {'git_commit': commit,
             'git_code_dirty': None if changed is None else bool(changed),
@@ -315,8 +342,8 @@ def experiment_state(folder, record, ignore_lock=False):
     if stored.get('status') != 'complete':
         return 'pending'  # bị ngắt hoặc lỗi giữa chừng: chạy lại từ đầu
     if {k: stored.get(k) for k in record} != record:
-        raise RuntimeError(f'{folder} holds a completed experiment with a different export or definition; '
-                           'use a new --output folder')
+        raise DefinitionMismatch(f'{folder} holds a completed experiment with a different export or definition; '
+                                 'use a new --output folder')
     return 'complete'
 
 
@@ -345,14 +372,26 @@ def run_experiment(name, frames, metadata, manifest, manifest_digest, output, ep
         print(f'{name}: locked by another process, skipped', flush=True)
         return 'locked'
     os.close(fd)
+    try:
+        # Tiến trình khác có thể vừa chạy xong và nhả lock giữa lần kiểm tra trên và lúc lấy lock. Kiểm ở
+        # đây, ngoài nhánh ghi "failed" bên dưới, để không bao giờ ghi đè một kết quả đã xong.
+        state = experiment_state(folder, record, ignore_lock=True)
+    except BaseException:
+        (folder / 'lock').unlink(missing_ok=True)
+        raise
+    if state == 'complete':
+        (folder / 'lock').unlink(missing_ok=True)
+        print(f'{name}: complete, skipped', flush=True)
+        return 'complete'
     started = time.time()
     try:
-        # Tiến trình khác có thể vừa chạy xong và nhả lock giữa lần kiểm tra trên và lúc lấy lock.
-        if experiment_state(folder, record, ignore_lock=True) == 'complete':
-            print(f'{name}: complete, skipped', flush=True)
-            return 'complete'
+        loaded = loaded_code()
+        environment = environment_record()  # code và thư viện lúc bắt đầu, trước khi train
+        if environment['code_sha256'] != loaded:
+            raise RuntimeError('Code files changed after this process started; restart it so results match the code')
         (folder / 'lock').write_text(f'pid={os.getpid()} started={time.ctime(started)}\n', encoding='utf-8')
-        save_json(folder / 'experiment.json', {**record, 'status': 'running', 'started': time.ctime(started)})
+        save_json(folder / 'experiment.json', {**record, 'status': 'running', 'started': time.ctime(started),
+                                               'environment': environment})
         drawn = {}
         masks = removal_masks(metadata, definition, drawn)
         subset = {split: frames[split].loc[~masks[split]].reset_index(drop=True) for split in SPLITS}
@@ -363,6 +402,8 @@ def run_experiment(name, frames, metadata, manifest, manifest_digest, output, ep
         print(f'{name}: train {counts["train"]["kept"]}, validation {counts["validation"]["kept"]}', flush=True)
         seed = definition['seed']
         arrays, _, _, settings = vectorize(subset, manifest['preprocessing'], epochs=epochs, seed=seed)
+        if settings['epochs'] != epochs:
+            raise RuntimeError(f'vectorize trained Doc2Vec for {settings["epochs"]} epochs, expected {epochs}')
         vectorized = time.time()
         X_train, y_train = arrays['train']
         X_val, y_val = arrays['validation']
@@ -381,6 +422,7 @@ def run_experiment(name, frames, metadata, manifest, manifest_digest, output, ep
         by_source.to_csv(folder / 'test_by_source.csv', index=False)
         np.savez(folder / 'test_scores.npz', **{model: s.astype(np.float32) for model, s in scores.items()})
         finished = time.time()
+        code_now = {file: file_sha256(BASE_DIR / file) for file in CODE_FILES}
         save_json(folder / 'experiment.json', {
             **record, 'status': 'complete', 'selected_model': selected,
             'models': {model: {**decision, 'threshold_constraint_met': bool(decision['precision_target_met'])}
@@ -389,7 +431,9 @@ def run_experiment(name, frames, metadata, manifest, manifest_digest, output, ep
             **({'random_control': drawn} if drawn else {}),
             'test_record_ids_sha256': hashlib.sha256('\n'.join(subset['test'].RecordId).encode()).hexdigest(),
             'test_scores_sha256': file_sha256(folder / 'test_scores.npz'),
-            'environment': environment_record(),
+            'environment': environment,
+            # File code khác với lúc tiến trình nạp code (sửa giữa đợt): kết quả không gắn chắc với commit đã ghi.
+            'code_changed_during_run': sorted(f for f, h in code_now.items() if h != loaded[f]),
             'seconds': {'vectorize': round(vectorized - started, 1), 'total': round(finished - started, 1)},
             'started': time.ctime(started), 'finished': time.ctime(finished)})
         print(f'{name}: complete in {(finished - started) / 3600:.2f} h, selected {selected}', flush=True)
@@ -413,22 +457,25 @@ def overlap_report(metadata):
             if len(groups) < 2:
                 continue
             sizes = cluster.Group.value_counts()
+            both = cluster.Class.nunique() > 1
             for i, a in enumerate(groups):
                 for b in groups[i + 1:]:
                     first, second = (a, b) if (a, b) in PRIORITY_PAIRS or (b, a) not in PRIORITY_PAIRS else (b, a)
                     # Lẫn nhãn xét riêng hai nhóm của cặp (cụm có thể vắt qua 3 nhóm trở lên).
                     mixed = group_class(first) != group_class(second)
-                    rows.append({'split': split, 'group_a': first, 'group_b': second, 'mixed': mixed,
+                    rows.append({'split': split, 'group_a': first, 'group_b': second, 'mixed': mixed, 'both': both,
                                  'rows_a': int(sizes[first]), 'rows_b': int(sizes[second])})
+    # clusters_with_both_labels: cụm có cả hai lớp, kể cả khi nhãn kia đến từ nhóm thứ ba ngoài cặp.
     columns = ['split', 'group_a', 'group_b', 'clusters', 'same_label_clusters', 'mixed_label_clusters',
-               'rows_a', 'rows_b', 'mixed_rows_a', 'mixed_rows_b']
+               'clusters_with_both_labels', 'rows_a', 'rows_b', 'mixed_rows_a', 'mixed_rows_b']
     if not rows:
         return pd.DataFrame(columns=columns)
     pairs = pd.DataFrame(rows)
     pairs['mixed_rows_a'] = pairs.rows_a.where(pairs.mixed, 0)
     pairs['mixed_rows_b'] = pairs.rows_b.where(pairs.mixed, 0)
     report = pairs.groupby(['split', 'group_a', 'group_b']).agg(
-        clusters=('mixed', 'size'), mixed_label_clusters=('mixed', 'sum'), rows_a=('rows_a', 'sum'),
+        clusters=('mixed', 'size'), mixed_label_clusters=('mixed', 'sum'),
+        clusters_with_both_labels=('both', 'sum'), rows_a=('rows_a', 'sum'),
         rows_b=('rows_b', 'sum'), mixed_rows_a=('mixed_rows_a', 'sum'), mixed_rows_b=('mixed_rows_b', 'sum')).reset_index()
     total = report.groupby(['group_a', 'group_b'], as_index=False).sum(numeric_only=True).assign(split='total')
     report = pd.concat([report, total], ignore_index=True)
@@ -456,8 +503,10 @@ def _with_deltas(frame, keys, reference, metrics):
         return frame
     base = reference[keys + metrics].rename(columns={m: f'reference_{m}' for m in metrics})
     merged = frame.merge(base, on=keys, how='left')
+    # Dòng của chính reference để trống: so với chính nó không mang thông tin.
+    own = merged.Experiment == REFERENCE
     for metric in metrics:
-        merged[f'delta_{metric}'] = merged[metric] - merged[f'reference_{metric}']
+        merged[f'delta_{metric}'] = (merged[metric] - merged[f'reference_{metric}']).mask(own)
     return merged.drop(columns=[f'reference_{m}' for m in metrics])
 
 
@@ -490,7 +539,8 @@ def summarize(output, test_metadata=None):
         # Góc nhìn "model chọn trên validation": so với model mà reference chọn, không phải cùng họ.
         chosen = reference_group[reference_group['Selected-on-validation']][['Group', 'Rate']]
         by_group = by_group.merge(chosen.rename(columns={'Rate': '_selected_rate'}), on='Group', how='left')
-        by_group['delta_vs_reference_selected_Rate'] = by_group.Rate - by_group.pop('_selected_rate')
+        by_group['delta_vs_reference_selected_Rate'] = (by_group.Rate - by_group.pop('_selected_rate')).mask(
+            by_group.Experiment == REFERENCE)
     overall.to_csv(output / 'summary_overall.csv', index=False)
     by_group.to_csv(output / 'summary_by_group.csv', index=False)
     written = ['summary_overall.csv', 'summary_by_group.csv']
@@ -649,8 +699,14 @@ MARKER = 'ablation.json'
 def claim_output(output, features, digest):
     """Chỉ ghi vào thư mục mới hoặc thư mục ablation của cùng bản xuất (không bao giờ vào run khác)."""
     output = Path(output)
-    if output.resolve() == Path(features).resolve():
+    resolved, export = output.resolve(), Path(features).resolve()
+    if resolved == export:
         raise RuntimeError('--output must differ from --features')
+    if export in resolved.parents:
+        raise RuntimeError('--output must not be inside the --features folder')
+    for parent in resolved.parents:
+        if any((parent / name).exists() for name in ('manifest.json', 'features_manifest.json', MARKER)):
+            raise RuntimeError(f'--output must not be inside another run or ablation folder ({parent})')
     marker = output / MARKER
     if marker.exists():
         stored = json.loads(marker.read_text(encoding='utf-8'))
@@ -660,8 +716,8 @@ def claim_output(output, features, digest):
     if output.exists() and any(output.iterdir()):
         raise RuntimeError(f'{output} is not empty and is not a dataset ablation folder; use a new --output folder')
     output.mkdir(parents=True, exist_ok=True)
-    save_json(marker, {'export_digest': digest, 'features': str(features), 'definition_version': DEFINITION_VERSION,
-                       'created': time.ctime()})
+    # Phiên bản định nghĩa nằm trong experiment.json của từng thí nghiệm, không ở đây.
+    save_json(marker, {'export_digest': digest, 'features': str(features), 'created': time.ctime()})
 
 
 def positive_int(value):
@@ -693,6 +749,7 @@ def main(argv=None):
         environment = {**os.environ, 'PYTHONHASHSEED': '0'}
         return subprocess.run([sys.executable, str(Path(__file__).resolve()), *(argv if argv is not None else sys.argv[1:])],
                               env=environment).returncode
+    loaded_code()  # mốc code của cả hàng đợi
     output = args.output
     if args.unlock:
         for name in args.unlock:
@@ -725,15 +782,16 @@ def main(argv=None):
     for name in args.experiments or list(EXPERIMENTS):
         try:
             run_experiment(name, frames, metadata, manifest, digest, output, epochs=args.doc2vec_epochs)
+        except DefinitionMismatch:
+            raise  # thư mục output sai: các thí nghiệm sau cũng sẽ sai
         except Exception as exc:  # một thí nghiệm lỗi không được dừng cả hàng đợi dài
             failed.append(name)
             print(f'{name}: FAILED ({exc!r}); see {output / name / "experiment.json"}', flush=True)
-    if _completed(output):
-        summarize(output, metadata['test'])
     if failed:
         print(f'Failed experiments: {", ".join(failed)}', flush=True)
-        return 1
-    return 0
+    if _completed(output):
+        summarize(output, metadata['test'])
+    return 1 if failed else 0
 
 
 if __name__ == '__main__':

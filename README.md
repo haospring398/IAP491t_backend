@@ -284,7 +284,9 @@ Mọi thí nghiệm chạy với `PYTHONHASHSEED=0` (script tự khởi động 
 - Nhóm hợp lệ:
   - `enron`: `enron` và `Enron.csv`;
   - `spamassassin`: bản thô và `SpamAssasin.csv`;
-  - `trec`: `trec07p`, `TREC_05.csv`, `TREC_06.csv`;
+  - `trec`: `trec07p`, `TREC_05.csv`, `TREC_06.csv`. Bảng nhóm còn ánh xạ `TREC_07.csv` → `trec` cho bản xuất làm
+    khi không có `Dataset/trec07p`; trong `runs/2026-11-08_features_v6` nó có 0 dòng, vì `load_data.py` loại CSV này
+    khi có bản thô (cùng corpus TREC 2007);
   - `ceas`;
   - `ling`.
 
@@ -307,6 +309,10 @@ Source lạ làm script dừng thay vì bị gom nhầm.
    - Dung sai: tổng ±1%, từng nhóm ±2% phần của nhóm đó. `experiment.json` (`random_control`) ghi số dòng và số cụm
      bỏ theo nhóm, các cụm bị loại kèm kích thước, và số cụm mà `without_nazario` bỏ. Trên
      `runs/2026-11-08_features_v6`, train bỏ 6.097/6.096 dòng trong 4.858 cụm, so với 4.343 cụm của `without_nazario`.
+   - `undrawable_rows` đếm dòng dương của từng nhóm nằm trong cụm không được bốc (lẫn nhãn, vắt nhóm hoặc quá lớn).
+     Train có 1.854 dòng Nazario như vậy, hầu hết chung cụm với EPVME, và 7.334 dòng EPVME (gồm cụm template 6.011
+     dòng). `without_nazario` bỏ cả những dòng Nazario này, còn đối chứng thì không bao giờ bỏ được. Vì vậy đối chứng
+     bỏ phần Nazario "riêng" nhiều hơn tỷ lệ và phần Nazario chung với EPVME ít hơn.
    - Đối chứng này tách "ít mẫu dương hơn" khỏi "chính các mẫu Nazario". Nó chỉ có một lần bốc.
 
 ```powershell
@@ -325,23 +331,28 @@ $F = "runs/2026-11-08_features_v6"; $O = "runs/2026-11-09_dataset_ablation"
 - **Tổng hợp.** Mỗi tiến trình tự tổng hợp khi xong, nên các file `summary_*` có thể bị cửa sổ khác ghi đè. Khi mọi
   cửa sổ đã xong, chạy `--summarize` một lần nữa để lấy bản cuối.
 - **Tiếp tục khi bị ngắt.** Thí nghiệm đã `complete` với cùng bản xuất và định nghĩa (gồm cả số epoch và
-  `PYTHONHASHSEED`) thì được bỏ qua. Nếu khác, script từ chối chạy và yêu cầu dùng `--output` mới. Thí nghiệm bị ngắt
+  `PYTHONHASHSEED`) thì được bỏ qua. Nếu khác, script dừng cả hàng đợi (`DefinitionMismatch`) và yêu cầu dùng
+  `--output` mới. Thí nghiệm bị ngắt
   hoặc lỗi sẽ chạy lại từ đầu ở lần sau; nếu lock còn sót thì xoá bằng `--unlock`, nhưng chỉ khi chắc chắn không còn
   tiến trình nào chạy thí nghiệm đó.
-- **Khi một thí nghiệm lỗi.** Thí nghiệm đó được ghi `status: failed` kèm traceback, các thí nghiệm sau vẫn chạy, và
-  lệnh trả mã 1 ở cuối.
+- **Khi một thí nghiệm lỗi.** Thí nghiệm đó được ghi `status: failed` kèm traceback, các thí nghiệm sau vẫn chạy, danh
+  sách thí nghiệm lỗi được in trước phần tổng hợp, và lệnh trả mã 1 ở cuối.
+- **Không sửa code giữa đợt.** Mỗi tiến trình ghi hash code lúc khởi động. Nếu file code trên đĩa khác mốc đó khi một
+  thí nghiệm bắt đầu, thí nghiệm bị từ chối; `code_changed_during_run` ghi các file bị sửa trong lúc thí nghiệm chạy.
+  Commit trước khi chạy để `git_code_dirty` là `false`.
 - **Thư mục output.** Script chỉ ghi vào thư mục mới hoặc thư mục có `ablation.json` của cùng bản xuất. Thư mục không
-  rỗng khác, ví dụ một run có sẵn trong `runs/`, sẽ bị từ chối.
+  rỗng khác, ví dụ một run có sẵn trong `runs/`, sẽ bị từ chối; thư mục con nằm trong bản xuất, trong một run (có
+  `manifest.json`/`features_manifest.json`) hoặc trong một thư mục ablation khác cũng vậy.
 
 **Kết quả.**
 
 | File | Nội dung |
 |---|---|
-| `<thí nghiệm>/experiment.json` | Định nghĩa, hash bản xuất, số dòng giữ/bỏ theo tập và nhóm, ngưỡng và `threshold_constraint_met` từng model, model được chọn, hash dòng test và điểm, thời gian |
+| `<thí nghiệm>/experiment.json` | Định nghĩa, hash bản xuất, số dòng giữ/bỏ theo tập và nhóm, ngưỡng và `threshold_constraint_met` từng model, model được chọn, hash dòng test và điểm, môi trường lúc bắt đầu (phiên bản, hash code, commit, `git_code_dirty`), `code_changed_during_run`, thời gian |
 | `<thí nghiệm>/test_overall.csv`, `test_by_group.csv`, `test_by_source.csv`, `validation_results.csv` | Chỉ số trên test của 9 model: tổng thể, theo nhóm, theo Source; các ứng viên trên validation |
 | `<thí nghiệm>/test_scores.npz` | Điểm của 9 model trên test (không lưu model, để tiết kiệm khoảng 1 GB mỗi thí nghiệm) |
-| `overlap_by_group.csv` | Cụm gần trùng vắt qua hai nhóm, theo cặp và theo tập: số cụm, cụm cùng nhãn, cụm lẫn nhãn, số dòng |
-| `summary_overall.csv` | Tổng thể theo hai phạm vi, `all` và `without_epvme`, kèm `delta_*` so với `reference` cùng họ classifier |
+| `overlap_by_group.csv` | Cụm gần trùng vắt qua hai nhóm, theo cặp và theo tập: số cụm, cụm cùng nhãn, cụm lẫn nhãn (hai nhóm của cặp khác lớp), `clusters_with_both_labels` (cụm có cả hai lớp, kể cả do nhóm thứ ba), số dòng |
+| `summary_overall.csv` | Tổng thể theo hai phạm vi, `all` và `without_epvme`, kèm `delta_*` so với `reference` cùng họ classifier (dòng của chính `reference` để trống) |
 | `summary_by_group.csv` | Theo nhóm: TP/FP/FN/TN, `Rate` (recall với nhóm dương, FPR với nhóm hợp lệ), `Pair-ROC-AUC`/`Pair-AP`, `held_out`, `delta_*` |
 | `summary_fixed_classifier.csv` | Cùng họ classifier mà `reference` chọn |
 | `summary_cross_source.csv`, `heatmap_cross_source.png` | Ma trận recall: hàng là `reference` và `only_*`, cột là nhóm dương |
@@ -363,6 +374,26 @@ $F = "runs/2026-11-08_features_v6"; $O = "runs/2026-11-09_dataset_ablation"
   hợp lệ:dương của train từ 4,7:1 thành 1,35:1, và của validation từ 5,1:1 thành 1,46:1. `Pair-ROC-AUC`/`Pair-AP` không phụ thuộc ngưỡng giúp tách hiệu ứng nội dung khỏi hiệu ứng ngưỡng. Mỗi
   nhóm chỉ có một lớp, nên được chấm cùng toàn bộ lớp còn lại của tập test: nhóm dương so với mọi email hợp lệ, nhóm
   hợp lệ so với mọi email dương.
+- **Precision phụ thuộc tỷ lệ lớp của test.** Precision trên test là precision *tại tỷ lệ lớp của test*, không phải
+  precision trong hộp thư thật. Test đầy đủ có 16,6% email dương; bỏ EPVME còn 8,6% (6.152/71.502), nên precision của
+  MLP ở `reference` tụt từ 0,90 xuống 0,81 dù số FP không đổi. Phép tính (không phải kết quả đo) với recall 0,998 và
+  FPR 2,24% của MLP:
+
+  | Tỷ lệ email dương | Precision ước tính |
+  |---|---|
+  | 8,6% (test không tính EPVME) | ≈ 0,81 |
+  | 1% | ≈ 0,31 |
+  | 0,1% | ≈ 0,04 |
+
+  Vì vậy FPR 2,24% là cao cho một bộ lọc thật, dù ROC-AUC đạt 0,9994. Khi báo cáo, dùng FPR và ROC-AUC/AP làm chỉ số
+  chính. Một điểm vận hành khác (ví dụ ngưỡng chọn trên validation sao cho FPR ≤ 0,1%) tính lại được từ
+  `test_scores.npz` và điểm validation mà không cần train; đó là phân tích riêng sau ablation, chưa có trong script.
+- **FPR theo nhóm cần kèm support.** Ở `reference` (MLP), FPR của SpamAssassin là 6,5% (82/1.252) và của CEAS là 4,8%
+  (161/3.359), so với Enron 1,7%. Tách SpamAssassin theo thư mục (chỉ 395 email thô còn giữ tên thư mục; 857 dòng từ
+  `SpamAssasin.csv` thì không): `hard_ham` 15,1% (11/73), `easy_ham` 5,1% (16/313), `SpamAssasin.csv` 6,4% (55/857).
+  `hard_ham` là thư hợp lệ được chọn vì giống spam, nên FPR cao ở đó phù hợp với giả thuyết này, nhưng 73 email là
+  quá ít để kết luận. Với nhóm nhỏ (Ling 468, SpamAssassin 1.252 email test), độ chênh vài điểm phần trăm chỉ là vài
+  chục email.
 - **`threshold_constraint_met = False`** nghĩa là không có ngưỡng nào đạt precision 0,9 trên validation, nên model dùng
   ngưỡng dự phòng có F2 tốt nhất (`select_threshold`). Recall thấp của các thí nghiệm đó có thể do ngưỡng chứ không phải
   do dữ liệu. Điều này dễ xảy ra nhất với `only_malspam`: tỷ lệ dương:hợp lệ khoảng 1:59 trên train và 1:56 trên
