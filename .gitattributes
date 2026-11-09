@@ -1,0 +1,4 @@
+# Chữ ký tiền xử lý (pipeline_cache.preprocessing_signature) băm từng byte của hai file này, nên luôn giữ LF
+# như blob upstream a202d55, bất kể core.autocrlf. Bản đóng băng của web có quy tắc riêng trong web/.gitattributes.
+/preprocess.py text eol=lf
+/pipeline_cache.py text eol=lf

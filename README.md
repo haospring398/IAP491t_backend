@@ -21,13 +21,15 @@ PhishingEmailDetection/
 ├── dataset_audit.py          # sổ đối soát ingestion (ingestion.sqlite, load_summary.json)
 ├── train.py                  # training: --mode baseline|specialists, --output <run-dir>
 ├── evaluate.py               # đánh giá: --run <run-dir>
+├── dataset_ablation.py       # ablation theo dataset: bỏ/chỉ giữ từng nhóm dataset, so trên cùng tập test
 ├── analyze_feature_importance.py, analyze_shap.py   # feature importance, SHAP của XGBoost
 ├── specialists.py, predict_specialists.py           # chế độ cũ: 4 nhánh chuyên trách, lọc 2 tầng
 ├── benchmark_pipeline.py     # đo tốc độ cache tiền xử lý
 ├── download_nazario.py       # tải corpus Nazario về Dataset/phishing/
+├── download_malspam.py       # tải malspam (zip có mật khẩu) về Dataset/malspam/
 ├── artifact_store.py         # xác minh/publish run cũ trong dumped_models/classification/runs/
 ├── requirements.txt
-├── tests/                    # test_pipeline.py, test_evaluate.py, test_shap.py
+├── tests/                    # test_pipeline.py, test_evaluate.py, test_shap.py, test_dataset_ablation.py
 ├── docs/                     # DATA_PIPELINE_REVIEW.md, IAP_Web_Application_Plan.md
 ├── Dataset/                  # dữ liệu gốc (git bỏ qua, trừ README của từng nguồn)
 ├── runs/                     # kết quả từng lần train/đánh giá, mỗi lần một thư mục runs/<YYYY-MM-DD_mô-tả>
@@ -73,8 +75,13 @@ Dataset **không có trong repo**. Đặt dữ liệu vào `Dataset/` theo cấu
 | `Dataset/df.csv` | Nhãn 0/1/2 không có tài liệu | Bị loại (vẫn được ghi lại) |
 
 Tải Nazario: `python download_nazario.py` (tải lại và ghi đè file nào có dung lượng khác bản trên server;
-`--only-recent N` chỉ tải N file cuối danh sách). Upstream dùng `download_malspam.py` để tải malspam nhưng
-chưa công bố script này; thiếu `Dataset/malspam/` thì loader bỏ qua, không lỗi.
+`--only-recent N` chỉ tải N file cuối danh sách). Tải malspam (tuỳ chọn): `python download_malspam.py`
+(`--years 2024 2025` để giới hạn năm; mặc định quét từ 2013, khoảng 1–2 giờ vì chờ 1 giây giữa hai request).
+Script lưu zip có mật khẩu nguyên dạng vào `Dataset/malspam/<năm>/`, nhưng chỉ khi danh mục zip có file `.eml`;
+zip chỉ chứa malware/attachment/pcap và zip email phishing bị bỏ ngay trong RAM. Kết quả ghi ở
+`Dataset/malspam/manifest.csv` (SHA-256 từng zip) và `skipped.csv`; chạy lại không tải trùng. Upstream nhắc tới
+`download_malspam.py` nhưng chưa công bố; bản ở đây được thêm và sửa local (2026-11-08), nên tập malspam không trùng
+đúng tập upstream đã dùng. Thiếu `Dataset/malspam/` thì loader bỏ qua, không lỗi.
 
 Quy tắc nhãn:
 - Nhãn lấy theo nguồn dữ liệu, **không bao giờ suy từ nội dung**.
@@ -260,6 +267,164 @@ suffix private của PSL (chỉ phổ biến ở phishing sau 2015).
 | `load_summary.json`, `ingestion.sqlite` | Đối soát từng file/bản ghi đã đọc |
 | `source_labels.csv`, `label_conflicts.csv`, `label_scope_excluded.csv`, `training_dispositions.csv` | Nhãn theo nguồn, mâu thuẫn, bị loại, và lý do cho từng email |
 
+## Ablation theo dataset (`dataset_ablation.py`)
+
+Đo đóng góp của từng dataset theo yêu cầu "tách từng dataset ra để đo lường, so sánh". Script đọc một bản xuất
+`train.py --features-only` (ví dụ `runs/2026-11-08_features_v6`, đã kiểm hash). Mỗi thí nghiệm bỏ hoặc chỉ giữ một
+nhóm dataset trong **train và validation**, train lại Doc2Vec cùng 9 classifier đúng như `train.py` (ngưỡng chọn trên
+validation, precision ≥ 0,9), rồi chấm trên **cùng một tập test đầy đủ**: mọi thí nghiệm dùng chung dòng test và thứ tự.
+Mọi thí nghiệm chạy với `PYTHONHASHSEED=0` (script tự khởi động lại nếu cần), vì vector Doc2Vec phụ thuộc hash seed.
+
+**Nhóm dataset.**
+- Nhóm dương:
+  - `nazario`: mọi `phishing-20xx`, `phishing*.mbox`, `private-phishing4.mbox`, `20051114.mbox`;
+  - `phishing_pot`;
+  - `epvme`;
+  - `malspam`.
+- Nhóm hợp lệ:
+  - `enron`: `enron` và `Enron.csv`;
+  - `spamassassin`: bản thô và `SpamAssasin.csv`;
+  - `trec`: `trec07p`, `TREC_05.csv`, `TREC_06.csv`;
+  - `ceas`;
+  - `ling`.
+
+Source lạ làm script dừng thay vì bị gom nhầm.
+
+**18 thí nghiệm, theo thứ tự ưu tiên** (mỗi thí nghiệm khoảng 4 giờ trên máy 16 GB, tổng khoảng 72 giờ):
+1. `reference`, `reference_seed43`, `reference_seed44`: đủ dữ liệu. Seed đổi seed của Doc2Vec và classifier, không đổi
+   cách chia tập; ba lần chạy này cho mức nhiễu.
+2. `without_<nhóm>` × 9: bỏ một nhóm.
+3. `without_enron_trec`: bỏ cùng lúc Enron và TREC. Hai nhóm này chồng lấn rất nhiều (xem phần cụm gần trùng), nên bỏ
+   riêng từng nhóm thì nhóm kia bù vào. Train chỉ còn 15.511 email hợp lệ so với 42.889 email dương: tỷ lệ lớp đảo
+   ngược, nên đọc thí nghiệm này qua `Pair-ROC-AUC`/`Pair-AP` và số đếm theo nhóm, không qua recall/FPR ở ngưỡng.
+4. `only_<nhóm dương>` × 4: một nhóm dương cùng toàn bộ email hợp lệ, tức là mỗi dataset một mình làm được gì.
+5. `random_like_nazario`: đối chứng ngẫu nhiên phân tầng, riêng cho train và validation (seed cố định).
+   - Mục tiêu tổng bằng số dòng mà `without_nazario` bỏ.
+   - Mỗi nhóm dương bỏ theo tỷ lệ của nó trên toàn bộ mẫu dương của tập, kể cả cụm bị loại khỏi lần bốc (train:
+     khoảng 61% EPVME, 17% Phishing Pot, 14% Nazario, 8% malspam).
+   - Chỉ bốc trọn các cụm `_group` thuần dương, thuộc một nhóm và không lớn hơn 5% mục tiêu. Vì vậy cụm template XSS
+     6.011 dòng không bao giờ bị bốc; cụm lẫn nhãn và cụm vắt nhiều nhóm cũng không.
+   - Dung sai: tổng ±1%, từng nhóm ±2% phần của nhóm đó. `experiment.json` (`random_control`) ghi số dòng và số cụm
+     bỏ theo nhóm, các cụm bị loại kèm kích thước, và số cụm mà `without_nazario` bỏ. Trên
+     `runs/2026-11-08_features_v6`, train bỏ 6.097/6.096 dòng trong 4.858 cụm, so với 4.343 cụm của `without_nazario`.
+   - Đối chứng này tách "ít mẫu dương hơn" khỏi "chính các mẫu Nazario". Nó chỉ có một lần bốc.
+
+```powershell
+$F = "runs/2026-11-08_features_v6"; $O = "runs/2026-11-09_dataset_ablation"
+.venv/Scripts/python.exe dataset_ablation.py --features $F --output $O --list       # 18 thí nghiệm, số dòng, trạng thái
+.venv/Scripts/python.exe dataset_ablation.py --features $F --output $O --overlap    # bước 0, vài chục giây
+.venv/Scripts/python.exe dataset_ablation.py --features $F --output $O              # chạy hết, bỏ qua thí nghiệm đã xong
+.venv/Scripts/python.exe dataset_ablation.py --features $F --output $O --experiments reference without_malspam
+.venv/Scripts/python.exe dataset_ablation.py --features $F --output $O --summarize  # chỉ tổng hợp
+.venv/Scripts/python.exe dataset_ablation.py --features $F --output $O --unlock without_enron  # lock của lần bị ngắt
+```
+
+**Chạy song song, tiếp tục khi bị ngắt.**
+- **Song song.** Có thể mở nhiều cửa sổ, mỗi cửa sổ chạy `--experiments` khác nhau; mỗi tiến trình cần thêm vài GB RAM.
+  File `lock` trong thư mục thí nghiệm ngăn hai tiến trình chạy cùng một thí nghiệm.
+- **Tổng hợp.** Mỗi tiến trình tự tổng hợp khi xong, nên các file `summary_*` có thể bị cửa sổ khác ghi đè. Khi mọi
+  cửa sổ đã xong, chạy `--summarize` một lần nữa để lấy bản cuối.
+- **Tiếp tục khi bị ngắt.** Thí nghiệm đã `complete` với cùng bản xuất và định nghĩa (gồm cả số epoch và
+  `PYTHONHASHSEED`) thì được bỏ qua. Nếu khác, script từ chối chạy và yêu cầu dùng `--output` mới. Thí nghiệm bị ngắt
+  hoặc lỗi sẽ chạy lại từ đầu ở lần sau; nếu lock còn sót thì xoá bằng `--unlock`, nhưng chỉ khi chắc chắn không còn
+  tiến trình nào chạy thí nghiệm đó.
+- **Khi một thí nghiệm lỗi.** Thí nghiệm đó được ghi `status: failed` kèm traceback, các thí nghiệm sau vẫn chạy, và
+  lệnh trả mã 1 ở cuối.
+- **Thư mục output.** Script chỉ ghi vào thư mục mới hoặc thư mục có `ablation.json` của cùng bản xuất. Thư mục không
+  rỗng khác, ví dụ một run có sẵn trong `runs/`, sẽ bị từ chối.
+
+**Kết quả.**
+
+| File | Nội dung |
+|---|---|
+| `<thí nghiệm>/experiment.json` | Định nghĩa, hash bản xuất, số dòng giữ/bỏ theo tập và nhóm, ngưỡng và `threshold_constraint_met` từng model, model được chọn, hash dòng test và điểm, thời gian |
+| `<thí nghiệm>/test_overall.csv`, `test_by_group.csv`, `test_by_source.csv`, `validation_results.csv` | Chỉ số trên test của 9 model: tổng thể, theo nhóm, theo Source; các ứng viên trên validation |
+| `<thí nghiệm>/test_scores.npz` | Điểm của 9 model trên test (không lưu model, để tiết kiệm khoảng 1 GB mỗi thí nghiệm) |
+| `overlap_by_group.csv` | Cụm gần trùng vắt qua hai nhóm, theo cặp và theo tập: số cụm, cụm cùng nhãn, cụm lẫn nhãn, số dòng |
+| `summary_overall.csv` | Tổng thể theo hai phạm vi, `all` và `without_epvme`, kèm `delta_*` so với `reference` cùng họ classifier |
+| `summary_by_group.csv` | Theo nhóm: TP/FP/FN/TN, `Rate` (recall với nhóm dương, FPR với nhóm hợp lệ), `Pair-ROC-AUC`/`Pair-AP`, `held_out`, `delta_*` |
+| `summary_fixed_classifier.csv` | Cùng họ classifier mà `reference` chọn |
+| `summary_cross_source.csv`, `heatmap_cross_source.png` | Ma trận recall: hàng là `reference` và `only_*`, cột là nhóm dương |
+| `seed_spread.csv` | Min, max, độ lệch chuẩn qua 3 seed của `reference`, tổng thể và theo nhóm |
+| `summary_nazario_by_cluster.csv` | Recall trên Nazario test, tách dòng nằm trong cụm có EPVME và dòng trong cụm thuần Nazario (kèm support). Với `without_nazario` và `only_epvme`, khoảng cách giữa hai số cho thấy bao nhiêu recall đến từ việc EPVME chứa body Nazario |
+| `summary_epvme_by_attack.csv` | Recall trên EPVME test theo họ tấn công heuristic, kèm support (XSS chỉ có 102 dòng test) |
+| `heatmap_{fixed,selected}_{recall,fpr}.png` | Độ chênh recall (nhóm dương) và FPR (nhóm hợp lệ) so với `reference`. `fixed` dùng họ classifier mà `reference` chọn. `selected` so model mỗi thí nghiệm chọn trên validation với model `reference` chọn (cột `delta_vs_reference_selected_Rate`) |
+
+**Cách đọc kết quả.**
+- **Cách gọi đúng.** Gọi kết quả là "đóng góp biên khi bỏ nhóm khỏi train/validation, trên tập test cố định", không phải "hiệu quả" tuyệt đối
+  của dataset. Leave-one-out đánh giá thấp các dataset giống nhau (bỏ cái này thì cái kia bù), vì vậy cần đọc cùng
+  `only_*` và ma trận chéo nguồn.
+- **Lớp dương** là email độc hại: phishing, malspam và EPVME tổng hợp. Ở phishing mode, spam của CEAS, Ling,
+  SpamAssassin, TREC và `Enron.csv` bị loại (`outside_label_scope`), nên các nhóm đó chỉ đóng góp email hợp lệ.
+- **Mức nhiễu.** Đọc `seed_spread.csv` trước khi diễn giải độ chênh. Ba seed chỉ cho ước lượng thô, và tập test không
+  đổi giữa các seed. Kích thước nhóm chênh nhau tới khoảng 100 lần: bỏ `enron` (143 nghìn dòng train) chủ yếu đo việc
+  mất dữ liệu. Độ chênh nhỏ của một nhóm nhỏ không chứng minh nhóm đó vô dụng.
+- **Ngưỡng.** Bỏ một nhóm làm đổi tỷ lệ lớp, nên ngưỡng chọn trên validation bị dời theo. Ví dụ bỏ `enron` đổi tỷ lệ
+  hợp lệ:dương của train từ 4,7:1 thành 1,35:1, và của validation từ 5,1:1 thành 1,46:1. `Pair-ROC-AUC`/`Pair-AP` không phụ thuộc ngưỡng giúp tách hiệu ứng nội dung khỏi hiệu ứng ngưỡng. Mỗi
+  nhóm chỉ có một lớp, nên được chấm cùng toàn bộ lớp còn lại của tập test: nhóm dương so với mọi email hợp lệ, nhóm
+  hợp lệ so với mọi email dương.
+- **`threshold_constraint_met = False`** nghĩa là không có ngưỡng nào đạt precision 0,9 trên validation, nên model dùng
+  ngưỡng dự phòng có F2 tốt nhất (`select_threshold`). Recall thấp của các thí nghiệm đó có thể do ngưỡng chứ không phải
+  do dữ liệu. Điều này dễ xảy ra nhất với `only_malspam`: tỷ lệ dương:hợp lệ khoảng 1:59 trên train và 1:56 trên
+  validation.
+- **Họ classifier cố định.** "Cùng họ classifier" là cùng loại model mà `reference` chọn, tune lại grid trên validation
+  của từng thí nghiệm, chứ không phải cùng một model.
+- **Khử trùng lặp y hệt** (đọc từ `preprocess.py`, trước khi chia tập):
+  - Các bản trùng y hệt mang nhãn khác nhau bị loại hết (`conflicting_labels`).
+  - Bản trùng cùng nhãn được giữ một bản theo thứ hạng nhãn: hợp lệ/phishing/malspam, rồi `malicious_synthetic`,
+    rồi spam. Cùng hạng thì giữ nguồn nạp trước, theo thứ tự `trec07p` → `phishing/` (Nazario và các CSV) →
+    SpamAssassin thô → Enron thô → EPVME → Phishing Pot → malspam.
+  - Vì vậy bỏ một nhóm không bỏ được các bản trùng y hệt của nó đã được tính cho nguồn khác.
+- **Cụm gần trùng** (`group_email_variants`):
+  - Cụm được gom không xét nhãn: cùng hash body đã chuẩn hóa, hoặc SimHash lệch không quá 3 bit.
+  - Cụm lẫn nhãn được giữ nguyên, mỗi dòng giữ nhãn riêng, và cả cụm nằm trong cùng một tập.
+  - Không có bước xử lý xung đột cho cụm gần trùng. Vì vậy mẫu EPVME có thể chung cụm, và chung tập, với email hợp lệ
+    mà nó được dựng từ đó. `overlap_by_group.csv` đếm các trường hợp này. Các cặp `epvme × nazario/enron/spamassassin/trec`
+    đứng đầu báo cáo. Một cụm vắt qua 3 nhóm được tính lẫn nhãn theo từng cặp.
+  - Kết quả trên `runs/2026-11-08_features_v6`, tổng 3 tập:
+
+    | Cặp nhóm | Số cụm | Loại cụm | Số dòng |
+    |---|---|---|---|
+    | `epvme × nazario` | 1.325 | cùng nhãn | 1.993 EPVME, 3.198 Nazario |
+    | `epvme × enron` | 12 | lẫn nhãn | |
+    | `epvme × spamassassin` | 16 | lẫn nhãn | |
+    | `epvme × trec` | 79 | lẫn nhãn | |
+    | **`enron × trec`** | **5.795** | cùng nhãn | 11.242 Enron, 8.777 TREC |
+
+  - Chồng lấn lớn nhất là `enron × trec`, vì TREC 2005 được dựng từ thư Enron. Vì vậy `without_enron` vẫn train trên
+    nội dung Enron qua TREC, và ngược lại; hai thí nghiệm này đo đóng góp phần riêng của từng nhóm.
+  - `without_enron_trec` đo phần đóng góp chung của khối email hợp lệ dạng Enron.
+  - 107 cụm lẫn nhãn, tổng 497 dòng trên cả 3 tập: `epvme × enron` 53, `× spamassassin` 98, `× trec` 346. So với
+    khoảng 400 nghìn dòng thì đây là nhiễu nhãn nhỏ.
+- **EPVME.** Nguồn: Exploiting Protocol Vulnerability Malicious Email, Zhang et al., *Cybersecurity* 8:14 (2025),
+  DOI 10.1186/s42400-024-00309-6, github.com/sunknighteric/EPVME-Dataset, GPL-3.0. EPVME chiếm khoảng 61% mẫu dương
+  của train, 57% của validation và 53% của test.
+  - Đây là email tổng hợp: From/To/Subject/body được lấy ngẫu nhiên, theo từng loại tấn công, từ mẫu lành tính hoặc độc
+    hại của Enron, Nazario, SpamAssassin và TREC07. Không có bảng ánh xạ nguồn cho từng mẫu.
+  - Payload gồm giả mạo SPF/DMARC, thao túng chữ ký S/MIME/OpenPGP, và XSS từ Wooyun Email XSS.
+  - Mọi mẫu gán nhãn malicious, không phải phishing thuần.
+  - Hệ quả:
+    - (a) Bỏ một nhóm không bỏ được nội dung của nhóm đó nằm trong EPVME. Ví dụ, `without_nazario` vẫn còn body
+      Nazario qua EPVME.
+    - (b) Kết quả `only_epvme` trên Nazario phải đọc cùng `overlap_by_group.csv`.
+    - (c) EPVME có thể mang body spam với nhãn dương, không nhất quán với việc phishing mode loại spam. Vì vậy dòng
+      tổng thể `without_epvme` là con số chính khi nói về phishing thật.
+    - Lưu ý về dòng `without_epvme`: ngưỡng của nó vẫn được chọn trên validation có EPVME (57% mẫu dương). Precision
+      0,9 trên validation vì thế không đảm bảo precision tương ứng trên phishing thật. Với phạm vi này, nên ưu tiên
+      ROC-AUC/AP, vốn không phụ thuộc ngưỡng.
+  - **Mẫu XSS** (kiểm tra trên `runs/2026-11-08_features_v6`):
+    - 5.871/6.171 dòng XSS heuristic của train (khoảng 95%) nằm trong một cụm gần trùng 6.011 dòng. Cụm còn có 138 dòng
+      `unattributed` và 2 dòng `from_injection`. Validation có 100 và test có 102 dòng XSS heuristic, nên khả năng
+      phát hiện XSS gần như không được đo trên test.
+    - Cụm đó là một template: body luôn là "This is a test mail for XSS." (text sau làm sạch: `test mail xss`).
+      Payload XSS nằm trong header `From`/`Subject`, không nằm trong markup của body.
+    - Không feature nào trong 36 feature HTML/script (`HTML_SECURITY_FEATURE_NAMES`, `HTML_PAYLOAD_FEATURE_NAMES`) bật
+      trên cụm này. Feature header `hdr_markup_in_headers` bật trên 99,9% cụm và 0% email hợp lệ của train. Vì vậy với
+      XSS, Doc2Vec chủ yếu thấy câu template, còn feature thủ công thấy payload qua header.
+    - Họ tấn công (`attack_family`) là heuristic của `load_data.py`, không phải nhãn gốc của dataset. Tổng khoảng 6.373
+      dòng XSS theo heuristic khác với 4.716 mẫu XSS trong Table 2 của bài báo (theo số liệu nhóm đọc từ bài báo).
+      Không báo cáo con số heuristic như số mẫu XSS thật.
+
 ## Giới hạn cần biết
 
 - **Mỗi nguồn chỉ chứa một lớp.** Ví dụ Enron toàn email hợp lệ, Nazario toàn phishing. Model có thể học "nguồn" thay vì "phishing", nên hãy xem `evaluation_by_source.csv` chứ đừng chỉ nhìn F1 tổng.
@@ -282,7 +447,8 @@ Web demo không dùng `preprocess.py` và `pipeline_cache.py` ở thư mục nà
 `web/backend/frozen_pipeline/` (đúng byte code upstream `a202d55` đã train run đang pin), và từ chối run có chữ ký
 tiền xử lý khác bản sao đó. Sửa hai file ở thư mục gốc không ảnh hưởng web. Từ khi merge v6, nội dung hai file ở
 gốc giống hệt bản đóng băng, nhưng chữ ký băm cả byte xuống dòng: `preprocess.py` đóng băng là CRLF như lúc upstream
-train, còn bản ở gốc là CRLF hay LF tuỳ `core.autocrlf` lúc checkout. Muốn web dùng run khác thì chép nguyên byte
+train, còn bản ở gốc luôn là LF (`.gitattributes` ở gốc đặt `eol=lf`, như blob upstream), nên run train ở gốc có
+chữ ký khác run đang pin. Muốn web dùng run khác thì chép nguyên byte
 hai file đã train run đó vào `web/backend/frozen_pipeline/`, đóng gói và pin run mới, tạo lại fixture test
 (`web/backend/tests/build_fixture.py`) và chạy test web backend.
 

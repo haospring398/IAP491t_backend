@@ -4,6 +4,7 @@ __pycache__/
 # Môi trường và dữ liệu tải về cục bộ
 venv/
 .venv/
+.venv311/
 .matplotlib/
 nltk_data/
 

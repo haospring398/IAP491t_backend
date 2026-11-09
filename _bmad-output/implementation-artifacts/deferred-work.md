@@ -55,10 +55,6 @@
   evidence: Unverified (medium if true): only num_attachments carries a note; settle with per-source feature rates or pred_contribs summaries per source on data_X_test.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-merge-upstream-v6-code.md`
-  summary: Pin line endings of root preprocess.py and pipeline_cache.py (root .gitattributes, LF like the a202d55 blobs or CRLF like upstream's training checkout)
-  evidence: preprocessing_signature hashes file bytes and core.autocrlf=true, so the root signature changes between checkouts (cache invalidation, run signature drift); CRLF would make root signatures equal baseline_v6's 4c010fc3.
-
-- source_spec: `_bmad-output/implementation-artifacts/spec-merge-upstream-v6-code.md`
   summary: Fix _simhash None/int column being cast to float64 in upstream group_email_variants/pipeline_cache (report upstream first)
   evidence: Verified: pandas stores [None, 2**64-3] as float64 and int() returns 2**64, so near-duplicate grouping uses rounded fingerprints; v6 was trained with the same behaviour, so a fix changes splits.
 
